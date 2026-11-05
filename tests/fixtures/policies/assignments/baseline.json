@@ -1,0 +1,11 @@
+{
+  "name": "baseline",
+  "properties": {
+    "displayName": "Baseline ({{environment}})",
+    "policySetDefinitionName": "baseline",
+    "parameters": {
+      "tagName": { "value": "{{tagName}}" },
+      "locations": { "value": "{{locations}}" }
+    }
+  }
+}

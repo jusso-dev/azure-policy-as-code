@@ -1,0 +1,26 @@
+{
+  "name": "deny-public-ip-on-nic",
+  "properties": {
+    "displayName": "Network interfaces should not have public IPs",
+    "description": "Blocks or audits NICs that attach a public IP address.",
+    "mode": "Indexed",
+    "metadata": { "category": "Network", "version": "1.0.0" },
+    "parameters": {
+      "effect": {
+        "type": "String",
+        "defaultValue": "Audit",
+        "allowedValues": [ "Audit", "Deny", "Disabled" ],
+        "metadata": { "displayName": "Effect" }
+      }
+    },
+    "policyRule": {
+      "if": {
+        "allOf": [
+          { "field": "type", "equals": "Microsoft.Network/networkInterfaces" },
+          { "not": { "field": "Microsoft.Network/networkInterfaces/ipconfigurations[*].publicIpAddress.id", "notLike": "*" } }
+        ]
+      },
+      "then": { "effect": "[parameters('effect')]" }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "baseline",
+  "properties": {
+    "displayName": "Baseline",
+    "description": "Unit test initiative",
+    "parameters": {
+      "tagName": { "type": "String" },
+      "locations": { "type": "Array" }
+    },
+    "policyDefinitions": [
+      {
+        "policyDefinitionReferenceId": "requireTag",
+        "policyDefinitionName": "require-tag",
+        "parameters": { "tagName": { "value": "[parameters('tagName')]" } }
+      },
+      {
+        "policyDefinitionReferenceId": "allowedLocations",
+        "policyDefinitionId": "/providers/Microsoft.Authorization/policyDefinitions/e56962a6-4747-49cd-b67b-bf8b01975c4c",
+        "parameters": { "listOfAllowedLocations": { "value": "[parameters('locations')]" } }
+      }
+    ]
+  }
+}

@@ -1,0 +1,59 @@
+# Nightly compliance report, with optional remediation. Non-compliant assignments show as failed tests.
+trigger: none
+pr: none
+
+schedules:
+  - cron: '0 19 * * *'   # 19:00 UTC = 05:00/06:00 AEST/AEDT
+    displayName: Nightly compliance
+    branches:
+      include: [ main ]
+    always: true
+
+parameters:
+  - name: environment
+    type: string
+    default: prod
+    values: [ dev, prod ]
+  - name: remediate
+    displayName: Start remediation tasks for deployIfNotExists/modify policies
+    type: boolean
+    default: false
+
+variables:
+  - group: azure-policy
+  - name: subscriptionId
+    ${{ if eq(parameters.environment, 'prod') }}:
+      value: $(PROD_SUBSCRIPTION_ID)
+    ${{ else }}:
+      value: $(DEV_SUBSCRIPTION_ID)
+
+jobs:
+  - job: Compliance
+    pool:
+      vmImage: windows-latest
+    timeoutInMinutes: 120
+    steps:
+      - checkout: self
+      - task: AzurePowerShell@5
+        displayName: Scan and report compliance
+        inputs:
+          azureSubscription: sc-azure-policy-${{ parameters.environment }}
+          azurePowerShellVersion: LatestVersion
+          pwsh: true
+          ScriptType: FilePath
+          ScriptPath: scripts/Invoke-PolicyCompliance.ps1
+          ScriptArguments: >-
+            -Environment '${{ parameters.environment }}'
+            -OutputPath '$(Common.TestResultsDirectory)'
+            -Scan
+            ${{ iif(parameters.remediate, '-Remediate', '') }}
+        env:
+          POLICY_SUBSCRIPTION_ID: $(subscriptionId)
+      - task: PublishTestResults@2
+        displayName: Publish compliance results
+        condition: succeededOrFailed()
+        inputs:
+          testResultsFormat: JUnit
+          testResultsFiles: '$(Common.TestResultsDirectory)/compliance.xml'
+          testRunTitle: Azure Policy compliance (${{ parameters.environment }})
+          failTaskOnFailedTests: false

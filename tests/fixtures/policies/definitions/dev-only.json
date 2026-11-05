@@ -1,0 +1,10 @@
+{
+  "name": "dev-only",
+  "environments": [ "dev" ],
+  "properties": {
+    "displayName": "Only in dev",
+    "description": "Filtered out of the test environment",
+    "mode": "All",
+    "policyRule": { "if": { "field": "type", "equals": "Microsoft.Storage/storageAccounts" }, "then": { "effect": "audit" } }
+  }
+}

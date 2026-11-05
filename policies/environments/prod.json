@@ -1,0 +1,10 @@
+{
+  "pacOwnerId": "azure-policy-as-code-prod",
+  "deploymentScope": "/subscriptions/${env:POLICY_SUBSCRIPTION_ID}",
+  "managedIdentityLocation": "australiaeast",
+  "tokens": {
+    "allowedLocations": [ "australiaeast", "australiasoutheast" ],
+    "requiredTagName": "costCentre",
+    "enforcementMode": "Default"
+  }
+}

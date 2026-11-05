@@ -1,0 +1,6 @@
+{
+  "pacOwnerId": "unit-test-owner",
+  "deploymentScope": "/subscriptions/${env:UNIT_TEST_SUBSCRIPTION_ID}",
+  "managedIdentityLocation": "westus2",
+  "tokens": { "tagName": "costCentre", "locations": [ "westus2", "australiaeast" ] }
+}

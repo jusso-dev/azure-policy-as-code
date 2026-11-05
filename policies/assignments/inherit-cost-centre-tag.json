@@ -1,0 +1,12 @@
+{
+  "name": "inherit-cost-centre-tag",
+  "identity": { "type": "SystemAssigned" },
+  "properties": {
+    "displayName": "Inherit {{requiredTagName}} tag from resource group",
+    "description": "Managed by the azure-policy-as-code pipeline.",
+    "policyDefinitionName": "inherit-tag-from-resource-group",
+    "parameters": {
+      "tagName": { "value": "{{requiredTagName}}" }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "baseline-waiver",
+  "scope": "/subscriptions/{{subscriptionId}}/resourceGroups/rg-legacy",
+  "properties": {
+    "policyAssignmentName": "baseline",
+    "policyDefinitionReferenceIds": [ "requireTag" ],
+    "exemptionCategory": "Waiver",
+    "expiresOn": "2099-01-01T00:00:00Z",
+    "displayName": "Legacy waiver"
+  }
+}

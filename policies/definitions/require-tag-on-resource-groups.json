@@ -1,0 +1,30 @@
+{
+  "name": "require-tag-on-resource-groups",
+  "properties": {
+    "displayName": "Require a tag on resource groups",
+    "description": "Resource groups must carry the named tag. Use deny in production, audit while rolling out.",
+    "mode": "All",
+    "metadata": { "category": "Tags", "version": "1.0.0" },
+    "parameters": {
+      "tagName": {
+        "type": "String",
+        "metadata": { "displayName": "Tag name", "description": "Name of the tag, such as costCentre" }
+      },
+      "effect": {
+        "type": "String",
+        "defaultValue": "Audit",
+        "allowedValues": [ "Audit", "Deny", "Disabled" ],
+        "metadata": { "displayName": "Effect" }
+      }
+    },
+    "policyRule": {
+      "if": {
+        "allOf": [
+          { "field": "type", "equals": "Microsoft.Resources/subscriptions/resourceGroups" },
+          { "field": "[concat('tags[', parameters('tagName'), ']')]", "exists": "false" }
+        ]
+      },
+      "then": { "effect": "[parameters('effect')]" }
+    }
+  }
+}

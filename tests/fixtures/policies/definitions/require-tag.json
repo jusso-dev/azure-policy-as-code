@@ -1,0 +1,16 @@
+{
+  "name": "require-tag",
+  "properties": {
+    "displayName": "Require tag",
+    "description": "Unit test definition",
+    "mode": "All",
+    "parameters": {
+      "tagName": { "type": "String" },
+      "effect": { "type": "String", "defaultValue": "Audit", "allowedValues": [ "Audit", "Deny", "Disabled" ] }
+    },
+    "policyRule": {
+      "if": { "field": "[concat('tags[', parameters('tagName'), ']')]", "exists": "false" },
+      "then": { "effect": "[parameters('effect')]" }
+    }
+  }
+}

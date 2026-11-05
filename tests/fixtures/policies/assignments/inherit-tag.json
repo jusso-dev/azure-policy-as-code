@@ -1,0 +1,9 @@
+{
+  "name": "inherit-tag",
+  "identity": { "type": "SystemAssigned" },
+  "properties": {
+    "displayName": "Inherit tag",
+    "policyDefinitionName": "inherit-tag",
+    "parameters": { "tagName": { "value": "{{tagName}}" } }
+  }
+}

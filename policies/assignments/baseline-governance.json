@@ -1,0 +1,16 @@
+{
+  "name": "baseline-governance",
+  "properties": {
+    "displayName": "Baseline governance ({{environment}})",
+    "description": "Managed by the azure-policy-as-code pipeline. Do not edit in the portal.",
+    "policySetDefinitionName": "baseline-governance",
+    "enforcementMode": "{{enforcementMode}}",
+    "parameters": {
+      "tagName": { "value": "{{requiredTagName}}" },
+      "allowedLocations": { "value": "{{allowedLocations}}" }
+    },
+    "nonComplianceMessages": [
+      { "message": "This resource breaks the baseline governance policy. See the policy repository README." }
+    ]
+  }
+}

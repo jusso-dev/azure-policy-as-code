@@ -1,0 +1,31 @@
+{
+  "name": "storage-require-https",
+  "properties": {
+    "displayName": "Storage accounts should only allow HTTPS and TLS 1.2",
+    "description": "Audits or denies storage accounts that allow HTTP traffic or a minimum TLS version below 1.2.",
+    "mode": "Indexed",
+    "metadata": { "category": "Storage", "version": "1.0.0" },
+    "parameters": {
+      "effect": {
+        "type": "String",
+        "defaultValue": "Audit",
+        "allowedValues": [ "Audit", "Deny", "Disabled" ],
+        "metadata": { "displayName": "Effect" }
+      }
+    },
+    "policyRule": {
+      "if": {
+        "allOf": [
+          { "field": "type", "equals": "Microsoft.Storage/storageAccounts" },
+          {
+            "anyOf": [
+              { "field": "Microsoft.Storage/storageAccounts/supportsHttpsTrafficOnly", "notEquals": true },
+              { "field": "Microsoft.Storage/storageAccounts/minimumTlsVersion", "notEquals": "TLS1_2" }
+            ]
+          }
+        ]
+      },
+      "then": { "effect": "[parameters('effect')]" }
+    }
+  }
+}

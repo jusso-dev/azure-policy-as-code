@@ -1,0 +1,59 @@
+# Azure Policy as code: validate on every change, plan per environment, deploy after approval.
+#
+# Set up once in Azure DevOps:
+#   1. Service connections (Azure Resource Manager, workload identity federation):
+#        sc-azure-policy-dev, sc-azure-policy-prod
+#      Roles for each identity at the deployment scope: Resource Policy Contributor, plus
+#      Role Based Access Control Administrator (or User Access Administrator) if any assignment uses a
+#      managed identity, plus Reader to list existing resources.
+#   2. Environments with approval checks: azure-policy-dev, azure-policy-prod
+#   3. Variable group 'azure-policy' with DEV_SUBSCRIPTION_ID and PROD_SUBSCRIPTION_ID.
+#   4. Branch policy on main: build validation with this pipeline, so pull requests run Validate and Plan.
+
+trigger:
+  branches:
+    include: [ main ]
+  paths:
+    include: [ policies/*, src/*, scripts/*, pipelines/* ]
+
+pr:
+  branches:
+    include: [ main ]
+
+variables:
+  - group: azure-policy
+
+stages:
+  - stage: Validate
+    displayName: Validate
+    jobs:
+      - job: Validate
+        pool:
+          vmImage: windows-latest
+        steps:
+          - checkout: self
+          - pwsh: ./scripts/Invoke-PolicyValidate.ps1 -ResultsPath '$(Common.TestResultsDirectory)'
+            displayName: Lint, unit test and validate policy
+          - task: PublishTestResults@2
+            displayName: Publish unit test results
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFormat: NUnit
+              testResultsFiles: '$(Common.TestResultsDirectory)/unit-tests.xml'
+              testRunTitle: AzPolicyOps unit tests
+
+  - template: templates/plan-and-deploy.yml
+    parameters:
+      environment: dev
+      serviceConnection: sc-azure-policy-dev
+      devopsEnvironment: azure-policy-dev
+      subscriptionId: $(DEV_SUBSCRIPTION_ID)
+      dependsOn: [ Validate ]
+
+  - template: templates/plan-and-deploy.yml
+    parameters:
+      environment: prod
+      serviceConnection: sc-azure-policy-prod
+      devopsEnvironment: azure-policy-prod
+      subscriptionId: $(PROD_SUBSCRIPTION_ID)
+      dependsOn: [ Deploy_dev ]

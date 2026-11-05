@@ -1,0 +1,8 @@
+out/
+*.plan.json
+.azcfg/
+.env
+.env.*
+.DS_Store
+._*
+TestResults/

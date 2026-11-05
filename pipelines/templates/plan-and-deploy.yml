@@ -1,0 +1,85 @@
+# Plan stage then gated deploy stage for one environment.
+# The deploy job targets an Azure DevOps environment; put approvals and checks on that environment.
+parameters:
+  - name: environment          # policies/environments/<environment>.json
+    type: string
+  - name: serviceConnection    # Azure Resource Manager service connection (workload identity federation recommended)
+    type: string
+  - name: devopsEnvironment    # Azure DevOps environment holding the approval check
+    type: string
+  - name: subscriptionId
+    type: string
+  - name: dependsOn
+    type: object
+    default: []
+  - name: skipDelete
+    type: boolean
+    default: false
+  - name: vmImage
+    type: string
+    default: windows-latest
+
+stages:
+  - stage: Plan_${{ parameters.environment }}
+    displayName: Plan ${{ parameters.environment }}
+    dependsOn: ${{ parameters.dependsOn }}
+    jobs:
+      - job: Plan
+        pool:
+          vmImage: ${{ parameters.vmImage }}
+        steps:
+          - checkout: self
+          - task: AzurePowerShell@5
+            name: plan
+            displayName: Plan Azure Policy changes
+            inputs:
+              azureSubscription: ${{ parameters.serviceConnection }}
+              azurePowerShellVersion: LatestVersion
+              pwsh: true
+              ScriptType: FilePath
+              ScriptPath: scripts/Invoke-PolicyPlan.ps1
+              ScriptArguments: >-
+                -Environment '${{ parameters.environment }}'
+                -OutputPath '$(Build.ArtifactStagingDirectory)/plan'
+                ${{ iif(parameters.skipDelete, '-SkipDelete', '') }}
+            env:
+              POLICY_SUBSCRIPTION_ID: ${{ parameters.subscriptionId }}
+          - publish: $(Build.ArtifactStagingDirectory)/plan
+            artifact: plan-${{ parameters.environment }}
+            displayName: Publish plan
+
+  - stage: Deploy_${{ parameters.environment }}
+    displayName: Deploy ${{ parameters.environment }}
+    dependsOn: Plan_${{ parameters.environment }}
+    # Only deploy from main, and only when the plan found changes.
+    condition: >-
+      and(
+        succeeded(),
+        eq(variables['Build.SourceBranch'], 'refs/heads/main'),
+        eq(dependencies.Plan_${{ parameters.environment }}.outputs['Plan.plan.hasChanges'], 'true')
+      )
+    jobs:
+      - deployment: Deploy
+        environment: ${{ parameters.devopsEnvironment }}
+        pool:
+          vmImage: ${{ parameters.vmImage }}
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - download: current
+                  artifact: plan-${{ parameters.environment }}
+                - task: AzurePowerShell@5
+                  displayName: Apply plan
+                  inputs:
+                    azureSubscription: ${{ parameters.serviceConnection }}
+                    azurePowerShellVersion: LatestVersion
+                    pwsh: true
+                    ScriptType: FilePath
+                    ScriptPath: scripts/Invoke-PolicyDeploy.ps1
+                    ScriptArguments: >-
+                      -PlanFile '$(Pipeline.Workspace)/plan-${{ parameters.environment }}/plan.json'
+                      -ComplianceScope '/subscriptions/${{ parameters.subscriptionId }}'
+                  env:
+                    POLICY_SUBSCRIPTION_ID: ${{ parameters.subscriptionId }}

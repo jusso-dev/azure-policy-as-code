@@ -1,0 +1,49 @@
+{
+  "name": "baseline-governance",
+  "properties": {
+    "displayName": "Baseline governance",
+    "description": "Tagging, location, network and storage guardrails applied to every subscription.",
+    "metadata": { "category": "Governance", "version": "1.0.0" },
+    "parameters": {
+      "tagName": { "type": "String", "metadata": { "displayName": "Required tag name" } },
+      "allowedLocations": { "type": "Array", "metadata": { "displayName": "Allowed locations", "strongType": "location" } },
+      "tagEffect": { "type": "String", "defaultValue": "Audit", "allowedValues": [ "Audit", "Deny", "Disabled" ] },
+      "networkEffect": { "type": "String", "defaultValue": "Audit", "allowedValues": [ "Audit", "Deny", "Disabled" ] },
+      "storageEffect": { "type": "String", "defaultValue": "Audit", "allowedValues": [ "Audit", "Deny", "Disabled" ] }
+    },
+    "policyDefinitionGroups": [
+      { "name": "Tags", "displayName": "Tagging" },
+      { "name": "Location", "displayName": "Allowed locations" },
+      { "name": "Security", "displayName": "Network and storage security" }
+    ],
+    "policyDefinitions": [
+      {
+        "policyDefinitionReferenceId": "requireRgTag",
+        "policyDefinitionName": "require-tag-on-resource-groups",
+        "groupNames": [ "Tags" ],
+        "parameters": {
+          "tagName": { "value": "[parameters('tagName')]" },
+          "effect": { "value": "[parameters('tagEffect')]" }
+        }
+      },
+      {
+        "policyDefinitionReferenceId": "allowedLocations",
+        "policyDefinitionId": "/providers/Microsoft.Authorization/policyDefinitions/e56962a6-4747-49cd-b67b-bf8b01975c4c",
+        "groupNames": [ "Location" ],
+        "parameters": { "listOfAllowedLocations": { "value": "[parameters('allowedLocations')]" } }
+      },
+      {
+        "policyDefinitionReferenceId": "noPublicIpOnNic",
+        "policyDefinitionName": "deny-public-ip-on-nic",
+        "groupNames": [ "Security" ],
+        "parameters": { "effect": { "value": "[parameters('networkEffect')]" } }
+      },
+      {
+        "policyDefinitionReferenceId": "storageHttps",
+        "policyDefinitionName": "storage-require-https",
+        "groupNames": [ "Security" ],
+        "parameters": { "effect": { "value": "[parameters('storageEffect')]" } }
+      }
+    ]
+  }
+}
