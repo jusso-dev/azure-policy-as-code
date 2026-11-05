@@ -20,6 +20,7 @@
         'New-PolicyDeploymentPlan'
         'Start-PolicyComplianceScan'
         'Start-PolicyRemediation'
+        'Test-PolicyDrift'
         'Test-PolicyRepository'
     )
     CmdletsToExport      = @()

@@ -26,6 +26,45 @@ Describe 'Get-PolicyEnvironment' {
     It 'lists available environments when one is missing' {
         { Get-PolicyEnvironment -Path $script:Fixture -Environment nope } | Should -Throw '*Available: test*'
     }
+    It 'ignores the schema file when listing environments' {
+        $repo = New-TempRepository
+        Set-Content (Join-Path $repo 'environments' 'environment.schema.json') '{ "type": "object" }'
+        InModuleScope AzPolicyOps -Parameters @{ Repo = $repo } { param($Repo) Get-PolicyEnvironmentName -Path $Repo | Should -Be @('test') }
+        { Test-PolicyRepository -Path $repo } | Should -Not -Throw
+    }
+    It 'rejects an unknown field and says where per-environment values go' {
+        $repo = New-TempRepository
+        Set-Content (Join-Path $repo 'environments' 'typo.json') '{ "pacOwnerId": "abc", "deploymentScope": "/subscriptions/x", "allowedLocations": ["a"] }'
+        { Get-PolicyEnvironment -Path $repo -Environment typo } | Should -Throw "*unknown field(s) allowedLocations*belong under 'tokens'*"
+    }
+    It 'explains a missing required field' {
+        $repo = New-TempRepository
+        Set-Content (Join-Path $repo 'environments' 'empty.json') '{ "deploymentScope": "/subscriptions/x" }'
+        { Get-PolicyEnvironment -Path $repo -Environment empty } | Should -Throw "*'pacOwnerId' is required: a unique ownership stamp*"
+    }
+    It 'rejects a definition scope in a different subscription from the deployment scope' {
+        $repo = New-TempRepository
+        Set-Content (Join-Path $repo 'environments' 'split.json') '{ "pacOwnerId": "abc", "deploymentScope": "/subscriptions/a", "definitionScope": "/subscriptions/b" }'
+        { Get-PolicyEnvironment -Path $repo -Environment split } | Should -Throw '*must be at or above deploymentScope*'
+    }
+    It 'accepts a description and returns it' {
+        $repo = New-TempRepository
+        Set-Content (Join-Path $repo 'environments' 'desc.json') '{ "$schema": "./environment.schema.json", "description": "Dev sub", "pacOwnerId": "abc", "deploymentScope": "/subscriptions/a" }'
+        (Get-PolicyEnvironment -Path $repo -Environment desc).Description | Should -Be 'Dev sub'
+    }
+    It 'validates the shipped dev and prod environment files' {
+        $env:POLICY_SUBSCRIPTION_ID = '99999999-0000-0000-0000-000000000000'
+        try {
+            $policies = Join-Path $PSScriptRoot '..' '..' 'policies'
+            foreach ($name in 'dev', 'prod') {
+                $e = Get-PolicyEnvironment -Path $policies -Environment $name
+                $e.DeploymentScope | Should -Be '/subscriptions/99999999-0000-0000-0000-000000000000'
+                $e.Description | Should -Not -BeNullOrEmpty
+            }
+            { Test-PolicyRepository -Path $policies } | Should -Not -Throw
+        }
+        finally { Remove-Item Env:POLICY_SUBSCRIPTION_ID }
+    }
     It 'rejects a resource group deployment scope' {
         $repo = New-TempRepository
         Set-Content (Join-Path $repo 'environments' 'bad.json') '{ "pacOwnerId": "abc", "deploymentScope": "/subscriptions/x/resourceGroups/y" }'

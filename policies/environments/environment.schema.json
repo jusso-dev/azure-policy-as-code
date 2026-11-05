@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AzPolicyOps environment",
+  "description": "One file per environment (dev.json, prod.json). It says WHERE the policy in this repository is deployed and HOW to tell it apart from policy deployed by anyone else. The policy files themselves are shared by every environment; this file is the only thing that differs.",
+  "type": "object",
+  "required": [ "pacOwnerId", "deploymentScope" ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "description": {
+      "type": "string",
+      "description": "Free text for people reading the file. Ignored by the tooling."
+    },
+    "pacOwnerId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{3,64}$",
+      "description": "Ownership stamp. Written to metadata.pacOwnerId on every definition, initiative, assignment and exemption this environment deploys. The pipeline only updates or deletes resources carrying this exact value, so policy made in the portal or by another repository is never touched. Must be unique per environment and per repository, and must never change once deployed (changing it orphans everything already deployed)."
+    },
+    "deploymentScope": {
+      "type": "string",
+      "pattern": "^(/subscriptions/[^/]+|/providers/Microsoft\\.Management/managementGroups/[^/]+)$",
+      "description": "Where assignments and exemptions go by default, and the area the drift check and delete logic look at. A subscription (/subscriptions/<id>) or management group (/providers/Microsoft.Management/managementGroups/<name>). Files can override it per assignment with \"scope\", for example to target a resource group inside it."
+    },
+    "definitionScope": {
+      "type": "string",
+      "pattern": "^(/subscriptions/[^/]+|/providers/Microsoft\\.Management/managementGroups/[^/]+)$",
+      "description": "Where custom definitions and initiatives are created. Optional; defaults to deploymentScope. Set it to a management group to share one copy of each definition across several subscriptions. It must be at or above every assignment scope, because Azure only lets you assign a definition at or below where it is defined."
+    },
+    "managedIdentityLocation": {
+      "type": "string",
+      "description": "Azure region for the managed identity that Azure creates for assignments with \"identity\" (needed by deployIfNotExists and modify policies). Any region works; it does not limit which resources the policy covers. Required only if an assignment uses an identity and does not set its own \"location\"."
+    },
+    "tokens": {
+      "type": "object",
+      "description": "Values that differ per environment. Any policy file can use {{name}} and gets this environment's value. A token that is a whole string value can be an array or object, e.g. \"listOfAllowedLocations\": { \"value\": \"{{allowedLocations}}\" }. Built in, always available: environment, pacOwnerId, deploymentScope, definitionScope, subscriptionId.",
+      "additionalProperties": true
+    }
+  }
+}

@@ -10,6 +10,21 @@ Describe 'Expand-PolicyToken' {
             , $result.value | Should -BeOfType [object[]]
         }
     }
+    It 'keeps a one-item array token as an array' {
+        InModuleScope AzPolicyOps {
+            $result = Expand-PolicyToken @{ value = '{{locs}}' } -Tokens @{ locs = @('westus2') }
+            , $result.value | Should -BeOfType [object[]]
+            $result.value | Should -HaveCount 1
+            (ConvertTo-Json $result -Compress) | Should -Be '{"value":["westus2"]}'
+        }
+    }
+    It 'keeps a one-item array from an environment file as an array' {
+        InModuleScope AzPolicyOps {
+            $tokens = ConvertFrom-PolicyJson '{"locs":["westus2"]}'
+            (ConvertTo-Json (Expand-PolicyToken @{ v = '{{locs}}' } -Tokens $tokens) -Compress) | Should -Be '{"v":["westus2"]}'
+            (ConvertTo-Json -InputObject (Copy-PolicyObject @('a')) -Compress) | Should -Be '["a"]'
+        }
+    }
     It 'replaces embedded tokens inside a longer string' {
         InModuleScope AzPolicyOps {
             (Expand-PolicyToken 'Baseline ({{env}})' -Tokens @{ env = 'prod' }) | Should -Be 'Baseline (prod)'

@@ -86,6 +86,12 @@ Connect-PolicyPipelineAccount | Out-Null
         }
         [pscustomobject]@{ Plan = $plan; PlanFile = (Join-Path $planDir 'plan.json'); PlanObject = $planObj; Deploy = $deploy }
     }
+    # The drift check must use the same role assignment setting as the deploy it is checking.
+    function script:Invoke-DriftStep([string]$OutDir, [string[]]$Extra = @()) {
+        $stepArgs = @('-Environment', 'it', '-PolicyPath', $script:Policies, '-OutputPath', $OutDir) + $Extra
+        if (-not $script:CanAssignRoles) { $stepArgs += '-SkipRoleAssignments' }
+        Invoke-PipelineStep 'Invoke-PolicyDrift.ps1' $stepArgs
+    }
     function script:Get-PlanOps($Run) {
         $h = @{}
         foreach ($a in $Run.PlanObject.actions) { $h["$($a.Kind)/$($a.Name)"] = $a.Operation }
@@ -360,6 +366,97 @@ Describe 'Azure Policy pipeline against live Azure' {
         @($roles.value) | Should -HaveCount 1
         $old = (Invoke-AzRestMethod -Method GET -Path "$script:RgScope/providers/Microsoft.Authorization/roleAssignments?api-version=2022-04-01&`$filter=principalId eq '$script:FirstPrincipal'").Content | ConvertFrom-Json
         @($old.value) | Should -HaveCount 0
+    }
+
+    It 'drift check reports Azure in sync with source control after deploy' {
+        $out = Join-Path $script:Work 'drift-clean'
+        $r = Invoke-DriftStep $out @('-FailOnDrift')
+        $r.ExitCode | Should -Be 0 -Because $r.Text
+        $r.Text | Should -Match 'driftDetected;isOutput=true\]false'
+        $report = Get-Content (Join-Path $out 'drift.json') -Raw | ConvertFrom-Json
+        $report.HasDrift | Should -BeFalse
+        $report.Summary.InSync | Should -Be 6
+        ([xml](Get-Content (Join-Path $out 'drift.xml') -Raw)).testsuites.testsuite.failures | Should -Be '0'
+    }
+
+    It 'drift check finds real portal edits, deletions, orphans and unmanaged policy, with field values' {
+        $defId = "$script:DefScope/policyDefinitions/$script:DefTag"
+        $asgId = "$script:RgScope/providers/Microsoft.Authorization/policyAssignments/$script:AsgBaseline"
+        $exId = "$script:RgScope/providers/Microsoft.Authorization/policyExemptions/$script:Exemption"
+        $orphanName = "$($script:Prefix)orphan"
+        $portalName = "$($script:Prefix)portal-made"
+        $rule = @{ if = @{ field = 'type'; equals = 'Microsoft.Network/publicIPAddresses' }; then = @{ effect = 'audit' } }
+
+        # Edits made directly in Azure, as someone would in the portal or CLI.
+        $live = Get-Arm $defId
+        $live.properties.displayName = 'Edited outside the pipeline'
+        $live.properties.parameters.effect.defaultValue = 'Deny'
+        (Invoke-AzRestMethod -Method PUT -Path "$defId`?api-version=2023-04-01" -Payload (@{ properties = $live.properties } | ConvertTo-Json -Depth 50 -Compress)).StatusCode | Should -BeIn 200, 201
+        $live = Get-Arm $asgId
+        $live.properties.enforcementMode = 'Default'
+        (Invoke-AzRestMethod -Method PUT -Path "$asgId`?api-version=2023-04-01" -Payload (@{ properties = $live.properties } | ConvertTo-Json -Depth 50 -Compress)).StatusCode | Should -BeIn 200, 201
+        (Invoke-AzRestMethod -Method DELETE -Path "$exId`?api-version=2022-07-01-preview").StatusCode | Should -BeIn 200, 204
+        (Invoke-AzRestMethod -Method PUT -Path "$script:DefScope/policyDefinitions/$orphanName`?api-version=2023-04-01" -Payload (@{ properties = @{ displayName = 'orphan'; mode = 'All'; metadata = @{ pacOwnerId = $script:Owner }; policyRule = $rule } } | ConvertTo-Json -Depth 20 -Compress)).StatusCode | Should -BeIn 200, 201
+        (Invoke-AzRestMethod -Method PUT -Path "$script:DefScope/policyDefinitions/$portalName`?api-version=2023-04-01" -Payload (@{ properties = @{ displayName = 'portal made'; mode = 'All'; policyRule = $rule } } | ConvertTo-Json -Depth 20 -Compress)).StatusCode | Should -BeIn 200, 201
+        try {
+            $out = Join-Path $script:Work 'drift-dirty'
+            $r = Invoke-DriftStep $out
+            $r.ExitCode | Should -Be 0 -Because 'without -FailOnDrift the step reports drift but succeeds'
+            $r.Text | Should -Match 'driftDetected;isOutput=true\]true'
+            $r.Text | Should -Match 'type=warning\]Azure Policy in .it. has drifted'
+            $report = Get-Content (Join-Path $out 'drift.json') -Raw | ConvertFrom-Json -AsHashtable -Depth 20
+            $byName = @{}; foreach ($i in $report.Items) { $byName["$($i.Kind)/$($i.Name)"] = $i }
+
+            $def = $byName["PolicyDefinition/$script:DefTag"]
+            $def.State | Should -Be 'Modified'
+            $def.Fix | Should -Be 'Update'
+            ($def.Differences | Where-Object Path -EQ 'displayName').Azure | Should -Be "'Edited outside the pipeline'"
+            ($def.Differences | Where-Object Path -EQ 'displayName').Repository | Should -Be "'IT: require tag on resources (v2)'"
+            ($def.Differences | Where-Object Path -EQ 'parameters.effect.defaultValue').Azure | Should -Be "'Deny'"
+            $def.LastModifiedBy | Should -Not -BeNullOrEmpty
+
+            $asg = $byName["PolicyAssignment/$script:AsgBaseline"]
+            $asg.State | Should -Be 'Modified'
+            ($asg.Differences | Where-Object Path -EQ 'enforcementMode').Repository | Should -Be "'DoNotEnforce'"
+            ($asg.Differences | Where-Object Path -EQ 'enforcementMode').Azure | Should -Be "'Default'"
+
+            $byName["PolicyExemption/$script:Exemption"].State | Should -Be 'MissingInAzure'
+            $byName["PolicyDefinition/$orphanName"].State | Should -Be 'NotInRepository'
+            $byName["PolicyDefinition/$portalName"].State | Should -Be 'Unmanaged'
+            $byName["PolicySetDefinition/$script:SetName"].State | Should -Be 'InSync'
+            $report.Summary.Modified | Should -Be 2
+            $report.Summary.MissingInAzure | Should -Be 1
+            $report.Summary.NotInRepository | Should -Be 1
+
+            Get-Content (Join-Path $out 'drift.md') -Raw | Should -Match 'Drift found'
+            $suite = ([xml](Get-Content (Join-Path $out 'drift.xml') -Raw)).testsuites.testsuite
+            [int]$suite.failures | Should -Be 4
+
+            $fail = Invoke-DriftStep $out @('-FailOnDrift')
+            $fail.ExitCode | Should -Not -Be 0
+            $fail.Text | Should -Match '4 resource\(s\) drifted from source control'
+
+            # Drift check is read-only: Azure still has the edit.
+            (Get-Arm $defId).properties.displayName | Should -Be 'Edited outside the pipeline'
+
+            # Deploying from source control removes the drift; the unmanaged policy is left alone.
+            $null = Invoke-PipelineRun
+            $after = Invoke-DriftStep (Join-Path $script:Work 'drift-after') @('-FailOnDrift')
+            $after.ExitCode | Should -Be 0 -Because $after.Text
+            $afterReport = Get-Content (Join-Path $script:Work 'drift-after' 'drift.json') -Raw | ConvertFrom-Json
+            $afterReport.HasDrift | Should -BeFalse
+            $afterReport.Summary.Unmanaged | Should -Be 1
+            Get-Arm "$script:DefScope/policyDefinitions/$orphanName" | Should -BeNullOrEmpty
+            (Get-Arm $defId).properties.displayName | Should -Be 'IT: require tag on resources (v2)'
+            Get-Arm $exId '2022-07-01-preview' | Should -Not -BeNullOrEmpty
+
+            $unmanaged = Invoke-DriftStep (Join-Path $script:Work 'drift-unmanaged') @('-FailOnUnmanaged')
+            $unmanaged.ExitCode | Should -Not -Be 0
+            $unmanaged.Text | Should -Match '1 unmanaged custom policy'
+        }
+        finally {
+            foreach ($n in $orphanName, $portalName) { Invoke-AzRestMethod -Method DELETE -Path "$script:DefScope/policyDefinitions/$n`?api-version=2023-04-01" | Out-Null }
+        }
     }
 
     It 'compliance scan and report run for the managed assignments' {

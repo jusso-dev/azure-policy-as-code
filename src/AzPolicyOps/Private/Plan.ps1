@@ -56,6 +56,39 @@ function Resolve-PolicyRoleDefinitionId {
     return "$root/providers/Microsoft.Authorization/roleDefinitions/$guid"
 }
 
+function Get-PolicyAdditionalScope {
+    <#
+    .SYNOPSIS
+        Scopes outside the deployment scope listing that repository assignments and exemptions use.
+    .DESCRIPTION
+        Listing assignments at a subscription also returns its resource groups, so resource group scopes
+        below a subscription deployment scope need no extra listing. Anything else does.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param([Parameter(Mandatory)][psobject]$DesiredState)
+    $deploymentScope = $DesiredState.Environment.DeploymentScope.ToLowerInvariant()
+    $isSubscription = (Get-PolicyScopeKind $DesiredState.Environment.DeploymentScope) -eq 'Subscription'
+    return [string[]]@($DesiredState.Resources | Where-Object Kind -In 'PolicyAssignment', 'PolicyExemption' | ForEach-Object Scope |
+            Where-Object { -not $isSubscription -or -not $_.ToLowerInvariant().StartsWith($deploymentScope) } | Sort-Object -Unique)
+}
+
+function New-PolicyDefinitionCatalog {
+    <#
+    .SYNOPSIS
+        Definition and initiative bodies by lowercase ID, repository first, then Azure. Used for parameter checks and role lookups.
+    #>
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param([Parameter(Mandatory)][psobject]$DesiredState, [AllowEmptyCollection()][object[]]$Deployed = @())
+    $catalog = @{}
+    foreach ($r in $DesiredState.Resources | Where-Object Kind -In 'PolicyDefinition', 'PolicySetDefinition') { $catalog[$r.Id.ToLowerInvariant()] = $r.Body }
+    foreach ($d in $Deployed | Where-Object Kind -In 'PolicyDefinition', 'PolicySetDefinition') {
+        if (-not $catalog.ContainsKey($d.Id.ToLowerInvariant())) { $catalog[$d.Id.ToLowerInvariant()] = $d.Body }
+    }
+    return $catalog
+}
+
 function Get-PolicyDefinitionCatalogEntry {
     <#
     .SYNOPSIS

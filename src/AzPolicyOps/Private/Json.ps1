@@ -9,7 +9,9 @@ function ConvertFrom-PolicyJson {
     if ([string]::IsNullOrWhiteSpace($Json)) { return $null }
     $params = @{ AsHashtable = $true; Depth = 100; NoEnumerate = $true }
     if ($script:ConvertFromJsonSupportsDateKind) { $params.DateKind = 'String' }
-    return ($Json | ConvertFrom-Json @params)
+    $result = $Json | ConvertFrom-Json @params
+    # The comma stops PowerShell unrolling a one-item array into a scalar on return.
+    return , $result
 }
 
 function Read-PolicyJsonFile {
@@ -93,7 +95,8 @@ function Copy-PolicyObject {
     [CmdletBinding()]
     param([Parameter(Position = 0)][AllowNull()]$InputObject)
     if ($null -eq $InputObject) { return $null }
-    return ConvertFrom-PolicyJson -Json (ConvertTo-Json -InputObject $InputObject -Depth 100 -Compress)
+    $copy = ConvertFrom-PolicyJson -Json (ConvertTo-Json -InputObject $InputObject -Depth 100 -Compress)
+    return , $copy
 }
 
 function Get-PolicyHash {

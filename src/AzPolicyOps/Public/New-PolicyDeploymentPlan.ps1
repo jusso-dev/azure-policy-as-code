@@ -53,23 +53,14 @@ function New-PolicyDeploymentPlan {
 
     Write-PolicyLog "Planning '$Environment' (owner $($envConfig.PacOwnerId)) as $($context.Account.Id)" -Level Section
 
-    $deploymentScope = $envConfig.DeploymentScope.ToLowerInvariant()
-    $extraScopes = @($desiredState.Resources | Where-Object { $_.Kind -in 'PolicyAssignment', 'PolicyExemption' } |
-            ForEach-Object Scope | Where-Object { -not $_.ToLowerInvariant().StartsWith($deploymentScope) -or (Get-PolicyScopeKind $envConfig.DeploymentScope) -ne 'Subscription' } |
-            Sort-Object -Unique)
-    $deployed = Get-PolicyDeployedState -Environment $envConfig -AdditionalScope $extraScopes
+    $deployed = Get-PolicyDeployedState -Environment $envConfig -AdditionalScope (Get-PolicyAdditionalScope -DesiredState $desiredState)
 
     $deployedById = @{}
     foreach ($d in $deployed) { $deployedById[$d.Id.ToLowerInvariant()] = $d }
     $desiredById = @{}
     foreach ($r in $desiredState.Resources) { $desiredById[$r.Id.ToLowerInvariant()] = $r }
 
-    # Catalog of definition bodies for parameter checks and role derivation.
-    $catalog = @{}
-    foreach ($r in $desiredState.Resources | Where-Object Kind -In 'PolicyDefinition', 'PolicySetDefinition') { $catalog[$r.Id.ToLowerInvariant()] = $r.Body }
-    foreach ($d in $deployed | Where-Object Kind -In 'PolicyDefinition', 'PolicySetDefinition') {
-        if (-not $catalog.ContainsKey($d.Id.ToLowerInvariant())) { $catalog[$d.Id.ToLowerInvariant()] = $d.Body }
-    }
+    $catalog = New-PolicyDefinitionCatalog -DesiredState $desiredState -Deployed $deployed
 
     # References to definitions this repo does not manage must exist, and parameters must match them.
     foreach ($r in $desiredState.Resources | Where-Object Kind -In 'PolicySetDefinition', 'PolicyAssignment') {

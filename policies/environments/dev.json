@@ -1,9 +1,11 @@
 {
+  "$schema": "./environment.schema.json",
+  "description": "Dev subscription. Policies audit only (enforcementMode DoNotEnforce) so nothing is blocked while rules are tried out.",
   "pacOwnerId": "azure-policy-as-code-dev",
   "deploymentScope": "/subscriptions/${env:POLICY_SUBSCRIPTION_ID}",
-  "managedIdentityLocation": "westus2",
+  "managedIdentityLocation": "australiaeast",
   "tokens": {
-    "allowedLocations": [ "westus2", "australiaeast", "australiasoutheast" ],
+    "allowedLocations": [ "australiaeast", "australiasoutheast", "westus2" ],
     "requiredTagName": "costCentre",
     "enforcementMode": "DoNotEnforce"
   }

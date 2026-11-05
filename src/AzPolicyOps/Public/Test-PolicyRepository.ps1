@@ -22,14 +22,14 @@ function Test-PolicyRepository {
 
     $root = (Resolve-Path -LiteralPath $Path).Path
     if (-not $Environment) {
-        $Environment = @(Get-ChildItem -LiteralPath (Join-Path $root 'environments') -Filter '*.json' -File).BaseName
+        $Environment = Get-PolicyEnvironmentName -Path $root
         if (-not $Environment) { throw "No environment files found in '$root/environments'." }
     }
 
     # Environment variables referenced by environment files may not exist on a validation agent.
     # Use placeholders so structure can still be validated.
     $placeholders = @{}
-    foreach ($file in (Get-ChildItem -LiteralPath (Join-Path $root 'environments') -Filter '*.json' -File)) {
+    foreach ($file in (Get-PolicyEnvironmentName -Path $root | ForEach-Object { Get-Item -LiteralPath (Join-Path $root 'environments' "$_.json") })) {
         foreach ($m in [regex]::Matches((Get-Content -LiteralPath $file.FullName -Raw), '\$\{env:([A-Za-z0-9_]+)\}')) {
             $name = $m.Groups[1].Value
             if (-not [Environment]::GetEnvironmentVariable($name)) {
