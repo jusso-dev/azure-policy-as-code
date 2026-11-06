@@ -189,3 +189,7 @@ Everything an integration run creates uses a unique owner ID and is cleaned up a
 | `Connect-PolicyPipelineAccount` | Service principal or federated sign-in outside `AzurePowerShell@5` |
 
 `Get-Help <function> -Full` gives details for each.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).

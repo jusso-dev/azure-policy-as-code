@@ -30,6 +30,7 @@
         PSData = @{
             Tags       = @('Azure', 'Policy', 'AzureDevOps', 'PolicyAsCode', 'Governance')
             ProjectUri = 'https://github.com/jusso-dev/azure-policy-as-code'
+            LicenseUri = 'https://github.com/jusso-dev/azure-policy-as-code/blob/main/LICENSE'
         }
     }
 }
