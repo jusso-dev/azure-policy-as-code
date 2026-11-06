@@ -111,7 +111,7 @@ function New-PolicyDeploymentPlan {
         $fingerprint = Get-PolicyStateFingerprint -Kind $r.Kind -Body $d.Body
         $action = New-PolicyPlanAction -Operation $operation -Kind $r.Kind -Name $r.Name -Scope $r.Scope -Id $d.Id -Body $r.Body -File $r.File `
             -Changes $changes -Reasons (@($reasons) + @($breaking)) -Fingerprint $fingerprint -DeployedOwner $d.Owner
-        if ($r.Kind -eq 'PolicyAssignment' -and $d.Body.identity -and $d.Body.identity.principalId) { $action.DeployedPrincipalId = $d.Body.identity.principalId }
+        if ($r.Kind -eq 'PolicyAssignment') { $action.DeployedPrincipalId = Get-PolicyIdentityPrincipalId $d.Body.identity }
         $actions[$key] = $action
     }
 
@@ -122,21 +122,24 @@ function New-PolicyDeploymentPlan {
         if ($SkipDelete) { $warnings.Add("$($d.Kind) '$($d.Name)' is no longer in the repository; not deleted because -SkipDelete was used."); continue }
         $action = New-PolicyPlanAction -Operation Delete -Kind $d.Kind -Name $d.Name -Scope $d.Scope -Id $d.Id -Body $null `
             -Reasons @('removed from repository') -Fingerprint (Get-PolicyStateFingerprint -Kind $d.Kind -Body $d.Body) -DeployedOwner $d.Owner
-        if ($d.Kind -eq 'PolicyAssignment' -and $d.Body.identity -and $d.Body.identity.principalId) { $action.DeployedPrincipalId = $d.Body.identity.principalId }
+        if ($d.Kind -eq 'PolicyAssignment') { $action.DeployedPrincipalId = Get-PolicyIdentityPrincipalId $d.Body.identity }
         $actions[$key] = $action
     }
 
-    # Replacing or deleting a definition/initiative needs its dependants out of the way first.
+    # Replacing or deleting a definition/initiative needs its dependants out of the way first, and an
+    # exemption is recreated along with the assignment it waives.
     $changed = $true
     while ($changed) {
         $changed = $false
-        foreach ($a in @($actions.Values | Where-Object { $_.Operation -in 'Replace', 'Delete' -and $_.Kind -in 'PolicyDefinition', 'PolicySetDefinition' })) {
+        foreach ($a in @($actions.Values | Where-Object { $_.Operation -in 'Replace', 'Delete' -and $_.Kind -in 'PolicyDefinition', 'PolicySetDefinition', 'PolicyAssignment' })) {
             foreach ($d in $deployed) {
-                if ($d.Kind -notin 'PolicySetDefinition', 'PolicyAssignment') { continue }
+                if ($d.Kind -notin 'PolicySetDefinition', 'PolicyAssignment', 'PolicyExemption') { continue }
                 $refs = @(Get-PolicyReferencedDefinitionId -Kind $d.Kind -Body $d.Body | ForEach-Object { $_.ToLowerInvariant() })
                 if ($a.Id.ToLowerInvariant() -notin $refs) { continue }
                 $dep = $actions[$d.Id.ToLowerInvariant()]
                 if (-not $dep) {
+                    # Exemptions from other owners don't block deleting an assignment.
+                    if ($d.Kind -eq 'PolicyExemption') { continue }
                     $errors.Add("$($a.Kind) '$($a.Name)' must be $(if ($a.Operation -eq 'Delete') { 'deleted' } else { 'replaced' }) but $($d.Kind) '$($d.Id)' uses it and is not managed by this repository ($($d.Owner)).")
                     continue
                 }

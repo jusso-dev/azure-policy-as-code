@@ -3,8 +3,8 @@
     Installs the modules the pipeline needs and imports AzPolicyOps. First step of every pipeline job.
 .DESCRIPTION
     Microsoft-hosted agents already have Az modules; self-hosted agents may not. Missing modules are
-    installed for the current user from the PowerShell Gallery. Versions are pinned in
-    scripts/requirements.psd1 so pipeline runs are repeatable.
+    installed for the current user from the PowerShell Gallery. Minimum versions are set in
+    scripts/requirements.psd1; a newer installed or published version satisfies them.
 #>
 [CmdletBinding()]
 param(

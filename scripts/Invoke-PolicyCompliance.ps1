@@ -23,7 +23,14 @@ New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null
 $envConfig = Get-PolicyEnvironment -Path $PolicyPath -Environment $Environment
 if (-not $Scope) { $Scope = $envConfig.DeploymentScope }
 
-if ($Scan) { Start-PolicyComplianceScan -Scope $Scope -Wait -TimeoutMinutes 60 | Out-Null }
+if ($Scan) {
+    if ($Scope -match '^/subscriptions/[^/]+(/resourceGroups/[^/]+)?/?$') {
+        Start-PolicyComplianceScan -Scope $Scope -Wait -TimeoutMinutes 60 | Out-Null
+    }
+    else {
+        Write-Host "##vso[task.logissue type=warning]On-demand scans only run at subscription or resource group scope; skipping the scan for $Scope and reporting Azure's last evaluation."
+    }
+}
 if ($Remediate) { Start-PolicyRemediation -Scope $Scope -PacOwnerId $envConfig.PacOwnerId -Wait -WhatIf:$WhatIfPreference | Out-Null }
 
 Get-PolicyComplianceSummary -Scope $Scope -PacOwnerId $envConfig.PacOwnerId `

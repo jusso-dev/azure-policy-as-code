@@ -49,7 +49,7 @@ The policy files are **shared by every environment**. Each file in `policies/env
 ```json
 {
   "$schema": "./environment.schema.json",
-  "description": "Production subscription. Policies are enforced.",
+  "description": "Production subscription. enforcementMode Default, so each policy applies its effect (the baseline initiative audits unless you set its effect parameters to Deny).",
   "pacOwnerId": "azure-policy-as-code-prod",
   "deploymentScope": "/subscriptions/${env:POLICY_SUBSCRIPTION_ID}",
   "managedIdentityLocation": "australiaeast",
@@ -88,7 +88,10 @@ See [`policies/`](policies) for a working baseline: a tagging, allowed-locations
 3. **Variable group.** Create `azure-policy` with `DEV_SUBSCRIPTION_ID` and `PROD_SUBSCRIPTION_ID`.
 4. **Pipelines.** Create one from `pipelines/azure-pipelines.yml`, one from `pipelines/drift-pipeline.yml` for the scheduled drift check, and optionally one from `pipelines/compliance-pipeline.yml` for nightly compliance reports. Then add the first one as a build validation branch policy on `main`.
 
-Pull requests run Validate and Plan, and the plan shows on the run summary. Merging to `main` runs the deploy stages after approval. The deploy stage is skipped when the plan finds no changes.
+Pull requests run Validate and Plan, and the plan shows on the run summary. Merging to `main` runs the deploy stages after approval. The deploy stage is skipped when the plan finds no changes. Prod is still planned (and deployed, after approval) when dev had nothing to deploy.
+
+> [!IMPORTANT]
+> Environment approvals only gate the deploy job. The Plan stage runs on pull requests with the same service connection, and a pull request can change the pipeline YAML and `scripts/`. To stop an unreviewed pull request writing to Azure, also add **Approvals** and a **Branch control** check (allow only `refs/heads/main`) to the service connections themselves. For more separation, plan with a second, Reader-only service connection per environment.
 
 ## Drift: is Azure still what Git says?
 

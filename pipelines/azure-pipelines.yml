@@ -14,7 +14,7 @@ trigger:
   branches:
     include: [ main ]
   paths:
-    include: [ policies/*, src/*, scripts/*, pipelines/* ]
+    include: [ policies, src, scripts, pipelines ]
 
 pr:
   branches:
@@ -56,4 +56,13 @@ stages:
       serviceConnection: sc-azure-policy-prod
       devopsEnvironment: azure-policy-prod
       subscriptionId: $(PROD_SUBSCRIPTION_ID)
-      dependsOn: [ Deploy_dev ]
+      # Deploy_dev is skipped when dev has no changes (and on pull requests). Prod is still planned
+      # then, so prod-only changes and earlier rejected prod deploys are not lost.
+      dependsOn: [ Plan_dev, Deploy_dev ]
+      planCondition: >-
+        and(
+          not(failed()),
+          not(canceled()),
+          eq(dependencies.Plan_dev.result, 'Succeeded'),
+          in(dependencies.Deploy_dev.result, 'Succeeded', 'Skipped')
+        )

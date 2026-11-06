@@ -19,7 +19,7 @@ function Get-PolicyStateFingerprint {
         $state[$property] = Get-PolicyComparableProperty -Property $property -Properties $props
     }
     if ($Kind -eq 'PolicyAssignment') {
-        $state['identity'] = if ($Body.identity -and $Body.identity.type) { $Body.identity.type } else { 'None' }
+        $state['identity'] = Get-PolicyIdentityKey $Body.identity
     }
     return Get-PolicyHash (ConvertTo-CanonicalJson $state)
 }
@@ -236,7 +236,7 @@ function ConvertTo-PolicyPlanMarkdown {
             if ($a.Changes) { $details += 'changes: ' + ($a.Changes -join ', ') }
             if ($a.Reasons) { $details += ($a.Reasons -join '; ') }
             if ($a.MissingRoleAssignments -and @($a.MissingRoleAssignments).Count) { $details += "$(@($a.MissingRoleAssignments).Count) role assignment(s) to add" }
-            $text = ($details -join '. ').Replace('|', '\|')
+            $text = ($details -join '. ').Replace('|', '\|') -replace '\r?\n', ' '
             [void]$sb.AppendLine("| **$($a.Operation)** | $($a.Kind) | ``$($a.Name)`` | ``$($a.Scope)`` | $text |")
         }
     }

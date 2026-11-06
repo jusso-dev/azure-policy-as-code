@@ -148,6 +148,30 @@ Describe 'Plan and deploy lifecycle' {
         $ops = Get-Ops $plan
         $ops['PolicySetDefinition/baseline'] | Should -Be 'Replace'
         $ops['PolicyAssignment/baseline'] | Should -Be 'Replace'
+        $ops['PolicyExemption/baseline-waiver'] | Should -Be 'Replace'
+    }
+
+    It 'accepts a role assignment wait longer than the retry limit' {
+        $plan = New-PolicyDeploymentPlan -Path $script:repo -Environment test
+        { Invoke-PolicyDeploymentPlan -Plan $plan -RoleAssignmentWaitSeconds 3600 -Confirm:$false } | Should -Not -Throw
+    }
+
+    It 'does not report role grants as done under -WhatIf' {
+        $plan = New-PolicyDeploymentPlan -Path $script:repo -Environment test
+        $result = Invoke-PolicyDeploymentPlan -Plan $plan -WhatIf
+        @($result.Results | Where-Object { $_.Step -eq 'RoleAssignments' -and $_.Status -eq 'Succeeded' }) | Should -HaveCount 0
+    }
+
+    It 'removes the role assignments of an identity the assignment no longer has' {
+        $null = Invoke-PlanAndDeploy $script:repo
+        @($global:FakeArm.Store.Keys | Where-Object { $_ -match '/roleassignments/' }) | Should -Not -HaveCount 0
+        # Dropping the identity is only valid once nothing needs it, so point the assignment at an audit-only definition.
+        Edit-Json (Join-Path $script:repo 'assignments' 'inherit-tag.json') {
+            param($d) $d.Remove('identity'); $d.properties.policyDefinitionName = 'require-tag'
+        }
+        $plan = Invoke-PlanAndDeploy $script:repo
+        ($plan.Actions | Where-Object { $_.Kind -eq 'PolicyAssignment' -and $_.Name -eq 'inherit-tag' }).Changes | Should -Contain 'identity'
+        @($global:FakeArm.Store.Keys | Where-Object { $_ -match '/roleassignments/' }) | Should -HaveCount 0
     }
 
     It 'replaces an exemption that moves to another assignment' {

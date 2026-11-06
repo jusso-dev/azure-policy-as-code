@@ -141,6 +141,56 @@ Describe 'Compare-PolicyResource' {
             Compare-PolicyResource -Kind PolicyAssignment -Desired $a -Deployed $b | Should -Be @('identity')
         }
     }
+    It 'detects a switch to a different user-assigned identity' {
+        InModuleScope AzPolicyOps {
+            $a = @{ properties = @{ policyDefinitionId = '/x' }; location = 'westus2'; identity = @{ type = 'UserAssigned'; userAssignedIdentities = @{ '/subscriptions/s/resourceGroups/rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/new' = @{} } } }
+            $b = @{ properties = @{ policyDefinitionId = '/x' }; location = 'westus2'; identity = @{ type = 'UserAssigned'; userAssignedIdentities = @{ '/subscriptions/s/resourcegroups/rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/old' = @{ principalId = 'p' } } } }
+            Compare-PolicyResource -Kind PolicyAssignment -Desired $a -Deployed $b | Should -Be @('identity')
+            $b.identity.userAssignedIdentities = @{ '/subscriptions/S/resourceGroups/RG/providers/Microsoft.ManagedIdentity/userAssignedIdentities/NEW' = @{ principalId = 'p' } }
+            Compare-PolicyResource -Kind PolicyAssignment -Desired $a -Deployed $b | Should -BeNullOrEmpty
+        }
+    }
+    It 'reads the principal of a user-assigned identity' {
+        InModuleScope AzPolicyOps {
+            Get-PolicyIdentityPrincipalId @{ type = 'UserAssigned'; userAssignedIdentities = @{ '/id' = @{ principalId = 'uai-principal' } } } | Should -Be 'uai-principal'
+            Get-PolicyIdentityPrincipalId @{ type = 'SystemAssigned'; principalId = 'sys-principal' } | Should -Be 'sys-principal'
+            Get-PolicyIdentityPrincipalId $null | Should -BeNullOrEmpty
+        }
+    }
+    It 'keeps empty values inside a policy rule' {
+        InModuleScope AzPolicyOps -Parameters @{ Desired = $script:desired } {
+            param($Desired)
+            $Desired = ConvertFrom-PolicyJson (ConvertTo-Json $Desired -Depth 20)
+            $deployed = ConvertFrom-PolicyJson (ConvertTo-Json $Desired -Depth 20)
+            $Desired.properties.policyRule.if = [ordered]@{ field = 'tags.env'; notEquals = '' }
+            $deployed.properties.policyRule.if = [ordered]@{ field = 'tags.env'; equals = '' }
+            Compare-PolicyResource -Kind PolicyDefinition -Desired $Desired -Deployed $deployed | Should -Be @('policyRule')
+        }
+    }
+    It 'detects a parameter that gains an empty-array default' {
+        InModuleScope AzPolicyOps -Parameters @{ Desired = $script:desired } {
+            param($Desired)
+            $Desired = ConvertFrom-PolicyJson (ConvertTo-Json $Desired -Depth 20)
+            $deployed = ConvertFrom-PolicyJson (ConvertTo-Json $Desired -Depth 20)
+            $Desired.properties.parameters.list = [ordered]@{ type = 'Array'; defaultValue = @() }
+            $deployed.properties.parameters.list = [ordered]@{ type = 'Array' }
+            Compare-PolicyResource -Kind PolicyDefinition -Desired $Desired -Deployed $deployed | Should -Be @('parameters')
+        }
+    }
+    It 'detects a change that only alters letter case' {
+        InModuleScope AzPolicyOps {
+            $a = @{ properties = @{ policyDefinitionId = '/x'; parameters = @{ env = @{ value = 'prod' } } } }
+            $b = @{ properties = @{ policyDefinitionId = '/X'; parameters = @{ env = @{ value = 'Prod' } } } }
+            Compare-PolicyResource -Kind PolicyAssignment -Desired $a -Deployed $b | Should -Be @('parameters')
+        }
+    }
+    It 'compares assignment overrides' {
+        InModuleScope AzPolicyOps {
+            $a = @{ properties = @{ policyDefinitionId = '/x'; overrides = @(@{ kind = 'policyEffect'; value = 'Disabled' }) } }
+            $b = @{ properties = @{ policyDefinitionId = '/x' } }
+            Compare-PolicyResource -Kind PolicyAssignment -Desired $a -Deployed $b | Should -Be @('overrides')
+        }
+    }
 }
 
 Describe 'Get-PolicyBreakingChange' {
@@ -233,6 +283,17 @@ Describe 'Write-PolicyLog in Azure DevOps' {
                 Mock Write-Host {}
                 Write-PolicyLog 'bad; thing]' -Level Error
                 Should -Invoke Write-Host -ParameterFilter { $Object -eq '##vso[task.logissue type=error]bad%3B thing%5D' }
+            }
+        }
+        finally { Remove-Item Env:TF_BUILD }
+    }
+    It 'stops a value with a line break from starting a logging command' {
+        $env:TF_BUILD = 'True'
+        try {
+            InModuleScope AzPolicyOps {
+                Mock Write-Host {}
+                Write-PolicyLog "description: 'x`n##vso[task.complete result=Succeeded]'"
+                Should -Invoke Write-Host -ParameterFilter { $Object -match '(?m)^\s*##' } -Times 0 -Exactly
             }
         }
         finally { Remove-Item Env:TF_BUILD }

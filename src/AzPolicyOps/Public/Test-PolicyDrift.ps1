@@ -99,10 +99,10 @@ function Test-PolicyDrift {
         if ($d.Owner -eq 'Unmanaged' -and -not $changed.Contains('metadata')) { $changed.Add('metadata') }
 
         $roleNote = $null
-        if ($r.Kind -eq 'PolicyAssignment' -and $r.IdentityType -ne 'None' -and -not $SkipRoleAssignments -and $d.Body.identity -and $d.Body.identity.principalId) {
+        if ($r.Kind -eq 'PolicyAssignment' -and $r.IdentityType -ne 'None' -and -not $SkipRoleAssignments -and ($principalId = Get-PolicyIdentityPrincipalId $d.Body.identity)) {
             $required = @(Get-PolicyRequiredRole -Desired $r -Catalog $catalog)
             if ($required.Count) {
-                $existing = @(Get-PolicyPrincipalRoleAssignment -PrincipalId $d.Body.identity.principalId -Scope (@($r.Scope) + @($required.Scope)))
+                $existing = @(Get-PolicyPrincipalRoleAssignment -PrincipalId $principalId -Scope (@($r.Scope) + @($required.Scope)))
                 $missing = @($required | Where-Object { $req = $_; -not ($existing | Where-Object { Test-PolicyRoleAssignmentMatch -Required $req -Existing $_ }) })
                 if ($missing.Count) {
                     $changed.Add('roleAssignments')
@@ -189,7 +189,7 @@ function ConvertTo-PolicyDriftMarkdown {
     [OutputType([string])]
     param([Parameter(Mandatory)][psobject]$Report)
 
-    $esc = { param($t) ([string]$t).Replace('|', '\|') }
+    $esc = { param($t) ([string]$t).Replace('|', '\|') -replace '\r?\n', ' ' }
     $sb = [System.Text.StringBuilder]::new()
     [void]$sb.AppendLine("## Azure Policy drift: $($Report.Environment)")
     [void]$sb.AppendLine()

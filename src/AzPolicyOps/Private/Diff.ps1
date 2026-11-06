@@ -33,7 +33,7 @@ function Get-PolicyValueDiff {
     $walk = {
         param($Left, $Right, $At)
         if ($out.Count -ge $limit) { return }
-        if (Test-PolicyValueEqual -Left $Left -Right $Right) { return }
+        if (Test-PolicyValueEqual -Left $Left -Right $Right -CaseSensitive) { return }
         if ($Left -is [System.Collections.IDictionary] -and $Right -is [System.Collections.IDictionary]) {
             $keys = @($Left.Keys) + @($Right.Keys) | Sort-Object -Unique
             foreach ($k in $keys) { & $walk $Left[$k] $Right[$k] "$At.$k" }
@@ -70,9 +70,9 @@ function Get-PolicyResourceDiff {
         switch ($p) {
             'identity' {
                 $diffs.Add([pscustomobject]@{
-                        Path       = 'identity.type'
-                        Repository = Format-PolicyDiffValue $(if ($Desired.identity) { $Desired.identity.type } else { 'None' })
-                        Azure      = Format-PolicyDiffValue $(if ($Deployed.identity) { $Deployed.identity.type } else { 'None' })
+                        Path       = 'identity'
+                        Repository = Format-PolicyDiffValue (Get-PolicyIdentityKey $Desired.identity)
+                        Azure      = Format-PolicyDiffValue (Get-PolicyIdentityKey $Deployed.identity)
                     })
             }
             'location' { $diffs.Add([pscustomobject]@{ Path = 'location'; Repository = Format-PolicyDiffValue $Desired.location; Azure = Format-PolicyDiffValue $Deployed.location }) }

@@ -79,12 +79,16 @@ function ConvertTo-CanonicalJson {
 function Test-PolicyValueEqual {
     <#
     .SYNOPSIS
-        Compares two values structurally (key order and string case insensitive).
+        Compares two values structurally, ignoring key order. String values compare case-insensitively
+        unless -CaseSensitive, which plan and drift comparisons use so a case-only change is deployed.
     #>
     [CmdletBinding()]
     [OutputType([bool])]
-    param([AllowNull()]$Left, [AllowNull()]$Right)
-    return ((ConvertTo-CanonicalJson $Left) -eq (ConvertTo-CanonicalJson $Right))
+    param([AllowNull()]$Left, [AllowNull()]$Right, [switch]$CaseSensitive)
+    $l = ConvertTo-CanonicalJson $Left
+    $r = ConvertTo-CanonicalJson $Right
+    if ($CaseSensitive) { return $l -ceq $r }
+    return $l -eq $r
 }
 
 function Copy-PolicyObject {

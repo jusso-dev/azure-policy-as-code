@@ -4,37 +4,47 @@ $script:SystemMetadataKeys = @('createdBy', 'createdOn', 'updatedBy', 'updatedOn
 $script:ComparedProperties = @{
     PolicyDefinition    = @('displayName', 'description', 'mode', 'metadata', 'parameters', 'policyRule')
     PolicySetDefinition = @('displayName', 'description', 'metadata', 'parameters', 'policyDefinitions', 'policyDefinitionGroups')
-    PolicyAssignment    = @('displayName', 'description', 'policyDefinitionId', 'parameters', 'enforcementMode', 'notScopes', 'nonComplianceMessages', 'metadata')
+    PolicyAssignment    = @('displayName', 'description', 'policyDefinitionId', 'parameters', 'enforcementMode', 'notScopes', 'nonComplianceMessages', 'overrides', 'resourceSelectors', 'metadata')
     PolicyExemption     = @('displayName', 'description', 'policyAssignmentId', 'policyDefinitionReferenceIds', 'exemptionCategory', 'expiresOn', 'metadata')
 }
 
 function Remove-PolicyEmptyValue {
     <#
     .SYNOPSIS
-        Drops nulls, empty strings, empty arrays and empty objects so "absent" and "empty" compare equal.
+        Treats a top-level null, empty string, empty array or empty object as absent, so "not set" and "empty" compare equal.
+    .DESCRIPTION
+        Only the value itself is checked, not its contents. Inside policyRule, parameters and similar trees an
+        empty value is meaningful (for example "equals": "" or "defaultValue": []), so nested values are kept.
     #>
     [CmdletBinding()]
     param([Parameter(Position = 0)][AllowNull()]$InputObject)
 
     if ($null -eq $InputObject) { return $null }
     if ($InputObject -is [string]) { if ($InputObject -eq '') { return $null } else { return $InputObject } }
+    $value = Remove-PolicyNullMember $InputObject
+    if ($value -is [System.Collections.IDictionary] -and $value.Count -eq 0) { return $null }
+    if ($value -is [array] -and $value.Count -eq 0) { return $null }
+    if ($value -is [array]) { return , $value }
+    return $value
+}
+
+function Remove-PolicyNullMember {
+    <#
+    .SYNOPSIS
+        Recursively drops object keys whose value is null (Azure returns some unset fields as null).
+        Empty strings, arrays and objects are kept: inside a policy they can be meaningful.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Position = 0)][AllowNull()]$InputObject)
     if ($InputObject -is [System.Collections.IDictionary]) {
         $out = [ordered]@{}
         foreach ($key in @($InputObject.Keys)) {
-            $value = Remove-PolicyEmptyValue $InputObject[$key]
-            if ($null -ne $value) { $out[$key] = $value }
+            if ($null -ne $InputObject[$key]) { $out[$key] = Remove-PolicyNullMember $InputObject[$key] }
         }
-        if ($out.Count -eq 0) { return $null }
         return $out
     }
-    if ($InputObject -is [System.Collections.IEnumerable]) {
-        $list = [System.Collections.Generic.List[object]]::new()
-        foreach ($item in $InputObject) {
-            $value = Remove-PolicyEmptyValue $item
-            if ($null -ne $value) { $list.Add($value) }
-        }
-        if ($list.Count -eq 0) { return $null }
-        return , $list.ToArray()
+    if ($InputObject -is [System.Collections.IEnumerable] -and $InputObject -isnot [string]) {
+        return , @(foreach ($item in $InputObject) { , (Remove-PolicyNullMember $item) })
     }
     return $InputObject
 }
@@ -60,6 +70,7 @@ function Get-PolicyComparableProperty {
                 foreach ($key in $value.Keys) {
                     $keepSystemKey = $DesiredProperties -and $DesiredProperties.metadata -is [System.Collections.IDictionary] -and $DesiredProperties.metadata.Contains($key)
                     if ($key -in $script:SystemMetadataKeys -and -not $keepSystemKey) { continue }
+                    if ($null -eq (Remove-PolicyEmptyValue $value[$key])) { continue }
                     $copy[$key] = $value[$key]
                 }
                 $value = $copy
@@ -88,7 +99,8 @@ function Get-PolicyComparableProperty {
             if ($value) {
                 $value = @($value | ForEach-Object {
                         $member = [ordered]@{}
-                        foreach ($key in $_.Keys) { $member[$key] = $_[$key] }
+                        # Azure may return empty groupNames/parameters on members; those mean the same as absent.
+                        foreach ($key in $_.Keys) { if ($null -ne (Remove-PolicyEmptyValue $_[$key])) { $member[$key] = $_[$key] } }
                         if ($member.policyDefinitionId) { $member.policyDefinitionId = $member.policyDefinitionId.ToLowerInvariant() }
                         if (-not $versioned.ContainsKey([string]$member.policyDefinitionReferenceId)) { $member.Remove('definitionVersion') }
                         $member
@@ -100,6 +112,40 @@ function Get-PolicyComparableProperty {
     }
 
     return Remove-PolicyEmptyValue $value
+}
+
+function Get-PolicyIdentityKey {
+    <#
+    .SYNOPSIS
+        Comparable form of an assignment identity: its type plus any user-assigned identity IDs (lowercased, sorted).
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Position = 0)][AllowNull()]$Identity)
+    if (-not $Identity -or -not $Identity.type -or $Identity.type -eq 'None') { return 'None' }
+    $ids = @()
+    if ($Identity.userAssignedIdentities -is [System.Collections.IDictionary]) {
+        $ids = @($Identity.userAssignedIdentities.Keys | ForEach-Object { ([string]$_).ToLowerInvariant() } | Sort-Object)
+    }
+    return (@([string]$Identity.type) + $ids) -join '|'
+}
+
+function Get-PolicyIdentityPrincipalId {
+    <#
+    .SYNOPSIS
+        Principal ID of an assignment's managed identity: system-assigned, or the (single) user-assigned identity.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Position = 0)][AllowNull()]$Identity)
+    if (-not $Identity) { return $null }
+    if ($Identity.principalId) { return [string]$Identity.principalId }
+    if ($Identity.userAssignedIdentities -is [System.Collections.IDictionary]) {
+        foreach ($uai in $Identity.userAssignedIdentities.Values) {
+            if ($uai -is [System.Collections.IDictionary] -and $uai.principalId) { return [string]$uai.principalId }
+        }
+    }
+    return $null
 }
 
 function Compare-PolicyResource {
@@ -122,13 +168,13 @@ function Compare-PolicyResource {
     foreach ($property in $script:ComparedProperties[$Kind]) {
         $left = Get-PolicyComparableProperty -Property $property -Properties $desiredProps -DesiredProperties $desiredProps
         $right = Get-PolicyComparableProperty -Property $property -Properties $deployedProps -DesiredProperties $desiredProps
-        if (-not (Test-PolicyValueEqual -Left $left -Right $right)) { $changes.Add($property) }
+        if (-not (Test-PolicyValueEqual -Left $left -Right $right -CaseSensitive)) { $changes.Add($property) }
     }
 
     if ($Kind -eq 'PolicyAssignment') {
+        if ((Get-PolicyIdentityKey $Desired.identity) -ne (Get-PolicyIdentityKey $Deployed.identity)) { $changes.Add('identity') }
         $desiredIdentity = if ($Desired.identity -and $Desired.identity.type) { $Desired.identity.type } else { 'None' }
         $deployedIdentity = if ($Deployed.identity -and $Deployed.identity.type) { $Deployed.identity.type } else { 'None' }
-        if ($desiredIdentity -ne $deployedIdentity) { $changes.Add('identity') }
         if ($desiredIdentity -ne 'None' -and $deployedIdentity -ne 'None' -and $Desired.location -and $Deployed.location -and
             ($Desired.location -replace '\s', '') -ne ($Deployed.location -replace '\s', '')) {
             $changes.Add('location')

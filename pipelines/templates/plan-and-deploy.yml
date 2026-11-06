@@ -12,6 +12,11 @@ parameters:
   - name: dependsOn
     type: object
     default: []
+  # Condition for the plan stage. Override it when a dependency can be skipped legitimately, e.g. the
+  # previous environment's deploy when that environment had no changes.
+  - name: planCondition
+    type: string
+    default: succeeded()
   - name: skipDelete
     type: boolean
     default: false
@@ -23,6 +28,7 @@ stages:
   - stage: Plan_${{ parameters.environment }}
     displayName: Plan ${{ parameters.environment }}
     dependsOn: ${{ parameters.dependsOn }}
+    condition: ${{ parameters.planCondition }}
     jobs:
       - job: Plan
         pool:

@@ -5,6 +5,7 @@
     "displayName": "Inherit {{requiredTagName}} tag from resource group",
     "description": "Managed by the azure-policy-as-code pipeline.",
     "policyDefinitionName": "inherit-tag-from-resource-group",
+    "enforcementMode": "{{enforcementMode}}",
     "parameters": {
       "tagName": { "value": "{{requiredTagName}}" }
     }

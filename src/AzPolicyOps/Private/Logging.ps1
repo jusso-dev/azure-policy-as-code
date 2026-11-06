@@ -26,9 +26,12 @@ function Write-PolicyLog {
     )
 
     $ado = Test-AzDevOpsHost
+    # Messages can contain values read from Azure or the repository. The agent runs any line that starts
+    # with ##vso[ or ##[, so on a pipeline a line break inside a message must not start a new command.
+    if ($ado -and $Level -in 'Info', 'Section') { $Message = $Message -replace '(?m)^(\s*)##', '$1# #' }
     switch ($Level) {
         'Section' {
-            if ($ado) { Write-Host "##[section]$Message" } else { Write-Host "== $Message" -ForegroundColor Cyan }
+            if ($ado) { Write-Host "##[section]$($Message -replace '\r?\n', ' ')" } else { Write-Host "== $Message" -ForegroundColor Cyan }
         }
         'Warning' {
             if ($ado) { Write-Host "##vso[task.logissue type=warning]$(ConvertTo-AzDevOpsLogValue $Message)" } else { Write-Warning $Message }

@@ -1,6 +1,6 @@
 {
   "$schema": "./environment.schema.json",
-  "description": "Production subscription. Policies are enforced.",
+  "description": "Production subscription. enforcementMode Default, so each policy applies its effect (the baseline initiative audits unless you set its effect parameters to Deny).",
   "pacOwnerId": "azure-policy-as-code-prod",
   "deploymentScope": "/subscriptions/${env:POLICY_SUBSCRIPTION_ID}",
   "managedIdentityLocation": "australiaeast",
