@@ -2,8 +2,14 @@
 # It enforces the update rules verified against real Azure (see Private/Breaking.ps1) so plan and
 # deploy logic can be tested end to end without a subscription.
 
-function global:Reset-FakeArm {
-    $global:FakeArm = @{
+$script:FakeArm = $null
+
+function Get-FakeArm {
+    return $script:FakeArm
+}
+
+function Reset-FakeArm {
+    $script:FakeArm = @{
         Store = [ordered]@{}
         Calls = [System.Collections.Generic.List[object]]::new()
     }
@@ -17,31 +23,31 @@ function global:Reset-FakeArm {
     }
 }
 
-function global:New-FakeArmResponse {
+function New-FakeArmResponse {
     param([int]$StatusCode, $Body)
     $content = if ($null -ne $Body) { ConvertTo-Json -InputObject $Body -Depth 100 -Compress } else { '' }
     [pscustomobject]@{ StatusCode = $StatusCode; Content = $content; Headers = [pscustomobject]@{ RetryAfter = $null; Location = $null } }
 }
 
-function global:New-FakeArmError {
+function New-FakeArmError {
     param([int]$StatusCode, [string]$Code, [string]$Message)
     New-FakeArmResponse -StatusCode $StatusCode -Body @{ error = @{ code = $Code; message = $Message } }
 }
 
-function global:Add-FakeArmResource {
+function Add-FakeArmResource {
     <# Seeds a resource directly, bypassing PUT validation (to simulate portal-made or other-owner resources). #>
     param([string]$Id, [hashtable]$Body)
     $item = ConvertFrom-Json (ConvertTo-Json $Body -Depth 100) -AsHashtable -Depth 100
     $item.id = $Id
     $item.name = ($Id -split '/')[-1]
-    $global:FakeArm.Store[$Id.ToLowerInvariant()] = $item
+    $script:FakeArm.Store[$Id.ToLowerInvariant()] = $item
 }
 
-function global:Invoke-FakeArm {
+function Invoke-FakeArm {
     param([string]$Method, [string]$Path, [string]$Uri, [string]$Payload)
 
     $raw = if ($Path) { $Path } else { ([uri]$Uri).PathAndQuery }
-    $global:FakeArm.Calls.Add([pscustomobject]@{ Method = $Method; Path = $raw; Payload = $Payload })
+    $script:FakeArm.Calls.Add([pscustomobject]@{ Method = $Method; Path = $raw; Payload = $Payload })
     $pathOnly, $query = $raw -split '\?', 2
     $key = $pathOnly.TrimEnd('/').ToLowerInvariant()
     $filter = ''
@@ -51,7 +57,7 @@ function global:Invoke-FakeArm {
             if ($k -eq '$filter') { $filter = [uri]::UnescapeDataString($v) }
         }
     }
-    $store = $global:FakeArm.Store
+    $store = $script:FakeArm.Store
     $collectionTypes = 'policydefinitions', 'policysetdefinitions', 'policyassignments', 'policyexemptions', 'roleassignments'
     $leaf = ($key -split '/')[-1]
 

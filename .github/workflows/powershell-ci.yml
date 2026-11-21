@@ -1,0 +1,122 @@
+name: PowerShell CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Lint, Test and Validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install PowerShell dependencies
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+
+          $modules = @(
+            @{ Name = 'Pester'; MinimumVersion = '5.5.0'; MaximumVersion = '5.99.99' }
+            @{ Name = 'PSScriptAnalyzer'; MinimumVersion = '1.21.0' }
+            @{ Name = 'Az.Accounts'; MinimumVersion = '2.13.0' }
+          )
+
+          foreach ($mod in $modules) {
+            $installed = Get-Module -ListAvailable -Name $mod.Name | Where-Object {
+              $_.Version -ge [version]$mod.MinimumVersion -and
+              (-not $mod.MaximumVersion -or $_.Version -le [version]$mod.MaximumVersion)
+            }
+            if ($installed) {
+              $top = ($installed | Sort-Object Version -Descending | Select-Object -First 1).Version
+              Write-Host "$($mod.Name) $top already installed."
+              continue
+            }
+            Write-Host "Installing $($mod.Name) (>= $($mod.MinimumVersion))..."
+            $installParams = @{
+              Name               = $mod.Name
+              MinimumVersion     = $mod.MinimumVersion
+              Scope              = 'CurrentUser'
+              Repository         = 'PSGallery'
+              Force              = $true
+              AllowClobber       = $true
+              SkipPublisherCheck = $true
+            }
+            if ($mod.MaximumVersion) {
+              $installParams.MaximumVersion = $mod.MaximumVersion
+            }
+            Install-Module @installParams
+          }
+
+      - name: Run PSScriptAnalyzer
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $findings = @(Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1)
+          if ($findings.Count -gt 0) {
+            foreach ($f in $findings) {
+              $level = if ($f.Severity -eq 'Error') { 'error' } else { 'warning' }
+              $relPath = [System.IO.Path]::GetRelativePath((Get-Location).Path, $f.ScriptPath).Replace('\', '/')
+              Write-Host "::${level} file=${relPath},line=$($f.Line)::$($f.RuleName): $($f.Message)"
+            }
+            $findings | Format-Table ScriptName, Line, Severity, RuleName, Message -AutoSize -Wrap
+            throw "PSScriptAnalyzer reported $($findings.Count) finding(s)."
+          }
+          Write-Host 'PSScriptAnalyzer passed with no findings.'
+
+      - name: Run Pester unit tests
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path ./out -Force | Out-Null
+          $config = New-PesterConfiguration
+          $config.Run.Path = './tests/unit'
+          $config.Run.Exit = $false
+          $config.Run.PassThru = $true
+          $config.Output.Verbosity = 'Detailed'
+          $config.TestResult.Enabled = $true
+          $config.TestResult.OutputFormat = 'NUnitXml'
+          $config.TestResult.OutputPath = './out/test-results.xml'
+
+          $result = Invoke-Pester -Configuration $config
+          if ($result.Result -ne 'Passed') {
+            throw "Pester failed: $($result.FailedCount) test(s) and $($result.FailedContainersCount) container(s) failed."
+          }
+
+      - name: Upload Pester test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pester-test-results
+          path: out/test-results.xml
+          if-no-files-found: error
+
+      - name: Validate policy JSON files
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $jsonFiles = @(Get-ChildItem -Path ./policies -Recurse -File -Filter '*.json' | Sort-Object FullName)
+          if ($jsonFiles.Count -eq 0) {
+            throw 'No JSON files found under ./policies.'
+          }
+          foreach ($file in $jsonFiles) {
+            $rel = [System.IO.Path]::GetRelativePath((Get-Location).Path, $file.FullName).Replace('\', '/')
+            try {
+              $null = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json -AsHashtable -Depth 100
+              Write-Host "Parsed JSON: $rel"
+            }
+            catch {
+              Write-Host "::error file=${rel}::Invalid JSON: $($_.Exception.Message)"
+              throw
+            }
+          }
+
+          Import-Module ./src/AzPolicyOps/AzPolicyOps.psd1 -Force
+          Test-PolicyRepository -Path ./policies -TreatWarningsAsErrors

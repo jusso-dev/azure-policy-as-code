@@ -1,5 +1,7 @@
 # azure-policy-as-code
 
+[![PowerShell CI](https://github.com/jusso-dev/azure-policy-as-code/actions/workflows/powershell-ci.yml/badge.svg)](https://github.com/jusso-dev/azure-policy-as-code/actions/workflows/powershell-ci.yml)
+
 Deploy and manage Azure Policy from JSON files in Git, through an Azure DevOps pipeline.
 
 `AzPolicyOps` is a PowerShell 7 module that reads policy definitions, initiatives, assignments and exemptions from this repository, compares them with Azure, and applies the difference. It plans first, waits for approval, then deploys. It only touches resources this repository created.
@@ -151,8 +153,10 @@ Get-PolicyComplianceSummary -Scope "/subscriptions/$env:POLICY_SUBSCRIPTION_ID" 
 
 ## Tests
 
+GitHub Actions runs PSScriptAnalyzer, the Pester unit tests (uploading NUnit XML results as an artefact), and offline policy JSON validation on pull requests and pushes to `main` via [`.github/workflows/powershell-ci.yml`](.github/workflows/powershell-ci.yml).
+
 ```powershell
-Invoke-Pester ./tests/unit                     # 105 tests, no Azure needed
+Invoke-Pester ./tests/unit                     # 161 tests, no Azure needed
 
 $env:ARM_TENANT_ID = '...'; $env:ARM_SUBSCRIPTION_ID = '...'; $env:ARM_CLIENT_ID = '...'; $env:ARM_CLIENT_SECRET = '...'
 $env:INTEGRATION_RESOURCE_GROUP = 'rg-policy-test'   # an existing, empty resource group

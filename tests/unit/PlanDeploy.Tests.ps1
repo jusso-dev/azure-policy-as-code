@@ -1,6 +1,6 @@
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '..' '..' 'src' 'AzPolicyOps' 'AzPolicyOps.psd1') -Force
-    . (Join-Path $PSScriptRoot 'FakeArm.ps1')
+    Import-Module (Join-Path $PSScriptRoot 'FakeArm.psm1') -Force
     $script:Fixture = Join-Path $PSScriptRoot '..' 'fixtures' 'policies'
     $script:Sub = '11111111-2222-3333-4444-555555555555'
     $script:Scope = "/subscriptions/$script:Sub"
@@ -23,7 +23,7 @@ BeforeAll {
         & $Change $doc
         ConvertTo-Json $doc -Depth 100 | Set-Content $Path
     }
-    function Get-Ops($Plan) {
+    function Get-PlanOperation($Plan) {
         $h = [ordered]@{}
         foreach ($a in $Plan.Actions) { $h["$($a.Kind)/$($a.Name)"] = $a.Operation }
         return $h
@@ -49,8 +49,8 @@ Describe 'Plan and deploy lifecycle' {
         $plan.Summary.Create | Should -Be 6
         $plan.HasChanges | Should -BeTrue
 
-        $global:FakeArm.Store.Keys | Should -Contain "$script:Scope/providers/microsoft.authorization/policydefinitions/require-tag".ToLowerInvariant()
-        $global:FakeArm.Store.Keys | Should -Contain "$script:Scope/resourcegroups/rg-legacy/providers/microsoft.authorization/policyexemptions/baseline-waiver".ToLowerInvariant()
+        (Get-FakeArm).Store.Keys | Should -Contain "$script:Scope/providers/microsoft.authorization/policydefinitions/require-tag".ToLowerInvariant()
+        (Get-FakeArm).Store.Keys | Should -Contain "$script:Scope/resourcegroups/rg-legacy/providers/microsoft.authorization/policyexemptions/baseline-waiver".ToLowerInvariant()
 
         $again = New-PolicyDeploymentPlan -Path $script:repo -Environment test
         $again.HasChanges | Should -BeFalse
@@ -60,7 +60,7 @@ Describe 'Plan and deploy lifecycle' {
     It 'writes definitions before initiatives before assignments before exemptions' {
         $null = Invoke-PlanAndDeploy $script:repo
         # Role assignments are written straight after their policy assignment, so they are left out here.
-        $puts = @($global:FakeArm.Calls | Where-Object { $_.Method -eq 'PUT' -and $_.Path -notmatch '/roleAssignments/' } | ForEach-Object { ($_.Path -split '\?')[0] -replace '.*/providers/Microsoft.Authorization/(\w+)/.*', '$1' })
+        $puts = @((Get-FakeArm).Calls | Where-Object { $_.Method -eq 'PUT' -and $_.Path -notmatch '/roleAssignments/' } | ForEach-Object { ($_.Path -split '\?')[0] -replace '.*/providers/Microsoft.Authorization/(\w+)/.*', '$1' })
         $order = @{ policyDefinitions = 0; policySetDefinitions = 1; policyAssignments = 2; policyExemptions = 3 }
         $ranks = $puts | ForEach-Object { $order[$_] }
         $ranks | Should -Be ($ranks | Sort-Object)
@@ -68,9 +68,9 @@ Describe 'Plan and deploy lifecycle' {
 
     It 'grants the managed identity the roles its modify policy needs, at the assignment scope' {
         $null = Invoke-PlanAndDeploy $script:repo
-        $assignment = $global:FakeArm.Store["$script:Scope/providers/microsoft.authorization/policyassignments/inherit-tag".ToLowerInvariant()]
+        $assignment = (Get-FakeArm).Store["$script:Scope/providers/microsoft.authorization/policyassignments/inherit-tag".ToLowerInvariant()]
         $assignment.identity.principalId | Should -Not -BeNullOrEmpty
-        $roles = @($global:FakeArm.Store.Values | Where-Object { $_.id -match '/roleAssignments/' })
+        $roles = @((Get-FakeArm).Store.Values | Where-Object { $_.id -match '/roleAssignments/' })
         $roles | Should -HaveCount 1
         $roles[0].properties.principalId | Should -Be $assignment.identity.principalId
         $roles[0].properties.roleDefinitionId | Should -Be "$script:Scope/providers/Microsoft.Authorization/roleDefinitions/4a9ae827-6dc8-4573-8ac7-8239d42aa03f"
@@ -79,13 +79,13 @@ Describe 'Plan and deploy lifecycle' {
 
     It 'restores a role assignment that was removed outside the pipeline' {
         $null = Invoke-PlanAndDeploy $script:repo
-        $roleKey = @($global:FakeArm.Store.Keys | Where-Object { $_ -match '/roleassignments/' })[0]
-        $global:FakeArm.Store.Remove($roleKey)
+        $roleKey = @((Get-FakeArm).Store.Keys | Where-Object { $_ -match '/roleassignments/' })[0]
+        (Get-FakeArm).Store.Remove($roleKey)
         $plan = New-PolicyDeploymentPlan -Path $script:repo -Environment test
-        (Get-Ops $plan)['PolicyAssignment/inherit-tag'] | Should -Be 'Update'
+        (Get-PlanOperation $plan)['PolicyAssignment/inherit-tag'] | Should -Be 'Update'
         ($plan.Actions | Where-Object Name -EQ 'inherit-tag' | Where-Object Kind -EQ 'PolicyAssignment').Changes | Should -Be @('roleAssignments')
         $null = Invoke-PolicyDeploymentPlan -Plan $plan -Confirm:$false
-        @($global:FakeArm.Store.Keys | Where-Object { $_ -match '/roleassignments/' }) | Should -HaveCount 1
+        @((Get-FakeArm).Store.Keys | Where-Object { $_ -match '/roleassignments/' }) | Should -HaveCount 1
     }
 
     It 'updates in place when a display name and policy rule change' {
@@ -98,7 +98,7 @@ Describe 'Plan and deploy lifecycle' {
         $action.Operation | Should -Be 'Update'
         $action.Changes | Should -Be @('displayName', 'policyRule')
         $plan.Summary.Update | Should -Be 1
-        $global:FakeArm.Store["$script:Scope/providers/microsoft.authorization/policydefinitions/require-tag".ToLowerInvariant()].properties.displayName | Should -Be 'Require tag v2'
+        (Get-FakeArm).Store["$script:Scope/providers/microsoft.authorization/policydefinitions/require-tag".ToLowerInvariant()].properties.displayName | Should -Be 'Require tag v2'
     }
 
     It 'adds a parameter with a default in place' {
@@ -109,12 +109,12 @@ Describe 'Plan and deploy lifecycle' {
             $d.properties.policyRule.if = @{ allOf = @($d.properties.policyRule.if, @{ value = "[parameters('tagValue')]"; notEquals = '' }) }
         }
         $plan = Invoke-PlanAndDeploy $script:repo
-        (Get-Ops $plan)['PolicyDefinition/require-tag'] | Should -Be 'Update'
+        (Get-PlanOperation $plan)['PolicyDefinition/require-tag'] | Should -Be 'Update'
     }
 
     It 'replaces a definition when a parameter is removed, replacing its users too' {
         $null = Invoke-PlanAndDeploy $script:repo
-        $before = $global:FakeArm.Store["$script:Scope/providers/microsoft.authorization/policyassignments/inherit-tag".ToLowerInvariant()].identity.principalId
+        $before = (Get-FakeArm).Store["$script:Scope/providers/microsoft.authorization/policyassignments/inherit-tag".ToLowerInvariant()].identity.principalId
         Edit-Json (Join-Path $script:repo 'definitions' 'inherit-tag.json') {
             param($d)
             $d.properties.parameters.Remove('tagName')
@@ -124,17 +124,17 @@ Describe 'Plan and deploy lifecycle' {
         Edit-Json (Join-Path $script:repo 'assignments' 'inherit-tag.json') { param($d) $d.properties.Remove('parameters') }
 
         $plan = New-PolicyDeploymentPlan -Path $script:repo -Environment test
-        $ops = Get-Ops $plan
+        $ops = Get-PlanOperation $plan
         $ops['PolicyDefinition/inherit-tag'] | Should -Be 'Replace'
         $ops['PolicyAssignment/inherit-tag'] | Should -Be 'Replace'
         $ops['PolicyDefinition/require-tag'] | Should -Be 'NoChange'
         ($plan.Actions | Where-Object { $_.Kind -eq 'PolicyDefinition' -and $_.Name -eq 'inherit-tag' }).Reasons | Should -Contain "parameter 'tagName' removed"
 
         $null = Invoke-PolicyDeploymentPlan -Plan $plan -Confirm:$false
-        $after = $global:FakeArm.Store["$script:Scope/providers/microsoft.authorization/policyassignments/inherit-tag".ToLowerInvariant()]
+        $after = (Get-FakeArm).Store["$script:Scope/providers/microsoft.authorization/policyassignments/inherit-tag".ToLowerInvariant()]
         $after | Should -Not -BeNullOrEmpty
         $after.identity.principalId | Should -Not -Be $before
-        $roles = @($global:FakeArm.Store.Values | Where-Object { $_.id -match '/roleAssignments/' })
+        $roles = @((Get-FakeArm).Store.Values | Where-Object { $_.id -match '/roleAssignments/' })
         $roles | Should -HaveCount 1
         $roles[0].properties.principalId | Should -Be $after.identity.principalId
 
@@ -145,7 +145,7 @@ Describe 'Plan and deploy lifecycle' {
         $null = Invoke-PlanAndDeploy $script:repo
         Edit-Json (Join-Path $script:repo 'initiatives' 'baseline.json') { param($d) $d.properties.parameters.tagName.type = 'Array' }
         $plan = New-PolicyDeploymentPlan -Path $script:repo -Environment test
-        $ops = Get-Ops $plan
+        $ops = Get-PlanOperation $plan
         $ops['PolicySetDefinition/baseline'] | Should -Be 'Replace'
         $ops['PolicyAssignment/baseline'] | Should -Be 'Replace'
         $ops['PolicyExemption/baseline-waiver'] | Should -Be 'Replace'
@@ -164,14 +164,14 @@ Describe 'Plan and deploy lifecycle' {
 
     It 'removes the role assignments of an identity the assignment no longer has' {
         $null = Invoke-PlanAndDeploy $script:repo
-        @($global:FakeArm.Store.Keys | Where-Object { $_ -match '/roleassignments/' }) | Should -Not -HaveCount 0
+        @((Get-FakeArm).Store.Keys | Where-Object { $_ -match '/roleassignments/' }) | Should -Not -HaveCount 0
         # Dropping the identity is only valid once nothing needs it, so point the assignment at an audit-only definition.
         Edit-Json (Join-Path $script:repo 'assignments' 'inherit-tag.json') {
             param($d) $d.Remove('identity'); $d.properties.policyDefinitionName = 'require-tag'
         }
         $plan = Invoke-PlanAndDeploy $script:repo
         ($plan.Actions | Where-Object { $_.Kind -eq 'PolicyAssignment' -and $_.Name -eq 'inherit-tag' }).Changes | Should -Contain 'identity'
-        @($global:FakeArm.Store.Keys | Where-Object { $_ -match '/roleassignments/' }) | Should -HaveCount 0
+        @((Get-FakeArm).Store.Keys | Where-Object { $_ -match '/roleassignments/' }) | Should -HaveCount 0
     }
 
     It 'replaces an exemption that moves to another assignment' {
@@ -180,8 +180,8 @@ Describe 'Plan and deploy lifecycle' {
             param($d) $d.properties.policyAssignmentName = 'inherit-tag'; $d.properties.Remove('policyDefinitionReferenceIds')
         }
         $plan = Invoke-PlanAndDeploy $script:repo
-        (Get-Ops $plan)['PolicyExemption/baseline-waiver'] | Should -Be 'Replace'
-        $global:FakeArm.Store["$script:Scope/resourcegroups/rg-legacy/providers/microsoft.authorization/policyexemptions/baseline-waiver".ToLowerInvariant()].properties.policyAssignmentId | Should -Match 'inherit-tag$'
+        (Get-PlanOperation $plan)['PolicyExemption/baseline-waiver'] | Should -Be 'Replace'
+        (Get-FakeArm).Store["$script:Scope/resourcegroups/rg-legacy/providers/microsoft.authorization/policyexemptions/baseline-waiver".ToLowerInvariant()].properties.policyAssignmentId | Should -Match 'inherit-tag$'
     }
 
     It 'deletes resources removed from the repository, dependants first, and their role assignments' {
@@ -191,11 +191,11 @@ Describe 'Plan and deploy lifecycle' {
         $plan = New-PolicyDeploymentPlan -Path $script:repo -Environment test
         $plan.Summary.Delete | Should -Be 2
         $null = Invoke-PolicyDeploymentPlan -Plan $plan -Confirm:$false
-        $deletes = @($global:FakeArm.Calls | Where-Object Method -EQ 'DELETE' | ForEach-Object { ($_.Path -split '\?')[0] })
+        $deletes = @((Get-FakeArm).Calls | Where-Object Method -EQ 'DELETE' | ForEach-Object { ($_.Path -split '\?')[0] })
         $deletes[0] | Should -Match '/roleAssignments/'
         $deletes[1] | Should -Match '/policyAssignments/inherit-tag$'
         $deletes[2] | Should -Match '/policyDefinitions/inherit-tag$'
-        @($global:FakeArm.Store.Keys | Where-Object { $_ -match 'inherit-tag|roleassignments' }) | Should -HaveCount 0
+        @((Get-FakeArm).Store.Keys | Where-Object { $_ -match 'inherit-tag|roleassignments' }) | Should -HaveCount 0
     }
 
     It 'keeps removed resources with -SkipDelete and warns' {
@@ -212,7 +212,7 @@ Describe 'Plan and deploy lifecycle' {
         }
         $plan = Invoke-PlanAndDeploy $script:repo
         $plan.Actions.Name | Should -Not -Contain 'someone-elses'
-        $global:FakeArm.Store.Keys | Should -Contain "$script:Scope/providers/microsoft.authorization/policydefinitions/someone-elses"
+        (Get-FakeArm).Store.Keys | Should -Contain "$script:Scope/providers/microsoft.authorization/policydefinitions/someone-elses"
     }
 
     It 'refuses a name clash with another owner unless -AllowOwnershipTakeover' {
@@ -241,7 +241,7 @@ Describe 'Plan and deploy lifecycle' {
         Edit-Json (Join-Path $script:repo 'definitions' 'require-tag.json') { param($d) $d.properties.displayName = 'v2' }
         $plan = New-PolicyDeploymentPlan -Path $script:repo -Environment test
         # Someone edits the definition in the portal between plan and deploy.
-        $global:FakeArm.Store["$script:Scope/providers/microsoft.authorization/policydefinitions/require-tag".ToLowerInvariant()].properties.description = 'portal edit'
+        (Get-FakeArm).Store["$script:Scope/providers/microsoft.authorization/policydefinitions/require-tag".ToLowerInvariant()].properties.description = 'portal edit'
         { Invoke-PolicyDeploymentPlan -Plan $plan -Confirm:$false } | Should -Throw '*Azure changed after the plan was made*'
         { Invoke-PolicyDeploymentPlan -Plan $plan -Force -Confirm:$false } | Should -Not -Throw
     }
@@ -249,12 +249,12 @@ Describe 'Plan and deploy lifecycle' {
     It 'makes no changes with -WhatIf' {
         $plan = New-PolicyDeploymentPlan -Path $script:repo -Environment test
         $null = Invoke-PolicyDeploymentPlan -Plan $plan -WhatIf
-        @($global:FakeArm.Calls | Where-Object Method -In 'PUT', 'DELETE') | Should -HaveCount 0
+        @((Get-FakeArm).Calls | Where-Object Method -In 'PUT', 'DELETE') | Should -HaveCount 0
     }
 
     It 'round-trips the plan through a JSON file, as between pipeline stages' {
         $file = Join-Path $script:repo 'plan.json'
-        $plan = New-PolicyDeploymentPlan -Path $script:repo -Environment test -OutFile $file -SummaryFile (Join-Path $script:repo 'plan.md')
+        $null = New-PolicyDeploymentPlan -Path $script:repo -Environment test -OutFile $file -SummaryFile (Join-Path $script:repo 'plan.md')
         Test-Path $file | Should -BeTrue
         Get-Content (Join-Path $script:repo 'plan.md') -Raw | Should -Match '\| 6 \| 0 \| 0 \| 0 \| 0 \|'
         $result = Invoke-PolicyDeploymentPlan -Plan $file -Confirm:$false
