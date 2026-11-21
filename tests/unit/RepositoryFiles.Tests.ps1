@@ -34,7 +34,14 @@ Describe 'Policy definition JSON files' {
                 $paramDef = $props.parameters[$paramName]
                 $paramDef.type | Should -BeIn $validTypes
                 if ($paramDef.Contains('defaultValue') -and $paramDef.allowedValues) {
-                    $paramDef.allowedValues | Should -Contain $paramDef.defaultValue
+                    if ($paramDef.type -eq 'Array' -and $paramDef.defaultValue -is [System.Collections.IList]) {
+                        foreach ($item in $paramDef.defaultValue) {
+                            $paramDef.allowedValues | Should -Contain $item
+                        }
+                    }
+                    else {
+                        $paramDef.allowedValues | Should -Contain $paramDef.defaultValue
+                    }
                 }
             }
         }
