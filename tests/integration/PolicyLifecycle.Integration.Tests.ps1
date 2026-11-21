@@ -92,7 +92,7 @@ Connect-PolicyPipelineAccount | Out-Null
         if (-not $script:CanAssignRoles) { $stepArgs += '-SkipRoleAssignments' }
         Invoke-PipelineStep 'Invoke-PolicyDrift.ps1' $stepArgs
     }
-    function script:Get-PlanOps($Run) {
+    function script:Get-PlanOperation($Run) {
         $h = @{}
         foreach ($a in $Run.PlanObject.actions) { $h["$($a.Kind)/$($a.Name)"] = $a.Operation }
         $h
@@ -284,7 +284,7 @@ Describe 'Azure Policy pipeline against live Azure' {
         $doc | ConvertTo-Json -Depth 50 | Set-Content $file
 
         $run = Invoke-PipelineRun
-        $ops = Get-PlanOps $run
+        $ops = Get-PlanOperation $run
         $ops["PolicyDefinition/$script:DefTag"] | Should -Be 'Update'
         $ops["PolicyAssignment/$script:AsgBaseline"] | Should -Be 'Update'
         $run.PlanObject.summary.Update | Should -Be 2
@@ -303,7 +303,7 @@ Describe 'Azure Policy pipeline against live Azure' {
         $doc | ConvertTo-Json -Depth 50 | Set-Content $file
 
         $run = Invoke-PipelineRun
-        (Get-PlanOps $run)["PolicyDefinition/$script:DefTag"] | Should -Be 'Update'
+        (Get-PlanOperation $run)["PolicyDefinition/$script:DefTag"] | Should -Be 'Update'
         (Get-Arm "$script:DefScope/policyDefinitions/$script:DefTag").properties.parameters.Keys | Should -Contain 'excludedType'
     }
 
@@ -330,7 +330,7 @@ Describe 'Azure Policy pipeline against live Azure' {
 
         # A fresh plan corrects the drift.
         $run = Invoke-PipelineRun
-        (Get-PlanOps $run)["PolicyDefinition/$script:DefTag"] | Should -Be 'Update'
+        (Get-PlanOperation $run)["PolicyDefinition/$script:DefTag"] | Should -Be 'Update'
         (Get-Arm "$script:DefScope/policyDefinitions/$script:DefTag").properties.displayName | Should -Be 'IT: require tag on resources (v2)'
     }
 
@@ -347,7 +347,7 @@ Describe 'Azure Policy pipeline against live Azure' {
         $doc | ConvertTo-Json -Depth 50 | Set-Content $file
 
         $run = Invoke-PipelineRun
-        $ops = Get-PlanOps $run
+        $ops = Get-PlanOperation $run
         $ops["PolicyDefinition/$script:DefInherit"] | Should -Be 'Replace'
         $ops["PolicyAssignment/$script:AsgInherit"] | Should -Be 'Replace'
         $run.Plan.Text | Should -Match 'type=warning\]This plan replaces 2 resource'
